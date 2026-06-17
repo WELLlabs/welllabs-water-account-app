@@ -1,0 +1,11 @@
+Crop,Season,Start Month,End Month,June,July,August,September,October,November,December,January,February,March,April,May
+Paddy,Kharif,June 15,November 15,804.64,668.92,758.11,625.93,552.31,193.07,0,0,0,0,0,0
+Paddy,Rabi,Nov 15,April 15,0,0,0,0,0,210.49,621.29,804.47,870.43,942.76,388.92,0
+Cotton,Kharif,June 1,Dec 15,447.83,421.14,566.26,610.23,545.84,378.85,241.44,0,0,0,0,0
+Groundnut,Rabi,Dec 15,April 25,0,0,0,0,0,0,0,451.01,687.73,1000.96,399.2,0
+Pulses (Arhar),Kharif,June 21,Dec 10th,293.58,297.66,540.15,563.15,561.89,291.76,124.12,0,0,0,0,0
+Pulses (Gram),Rabi,Dec 15,March 28,0,0,0,0,0,0,0,471.14,718.94,695.78,0,0
+Millets (Sorghum),Kharif,June 25,Nov 15,241.37,238.52,490.37,531.76,407.65,28.58,0,0,0,0,0,0
+Millets (Bajra)),Rabi,Nov 15,March 1st,0,0,0,0,0,0,407.55,690.94,515.43,25.79,0,0
+Sunflower,Kharif,June 5,Oct 15,406.3,361.73,595.4,432.37,102.52,0,0,0,0,0,0,0
+Seasame,Rabi,Nov 21,Mar 10,0,0,0,0,0,0,342.04,676.4,709.18,180.51,0,0
