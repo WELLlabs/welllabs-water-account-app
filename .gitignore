@@ -8,3 +8,4 @@ dist
 !.env.example
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
+NRBC_D10_L1.gpkg
