@@ -71,13 +71,13 @@ echo "  → build/index.html confirmed."
 # nginx -t
 # echo "  → Nginx config test passed."
 
-# # ── 4. Atomic symlink swap ───────────────────────────────────
-# echo "[4/5] Swapping symlink: current → ${RELEASE_NAME}"
-# ln -sfn "${RELEASE_DIR}" "${CURRENT_LINK}"
+# ── 4. Atomic symlink swap ───────────────────────────────────
+echo "[4/5] Swapping symlink: current → ${RELEASE_NAME}"
+ln -sfn "${RELEASE_DIR}" "${CURRENT_LINK}"
 
-# chown -R ubuntu:ubuntu "${RELEASES_DIR}" 2>/dev/null || true
-# # Use the real path (not the symlink) for chmod to avoid following to wrong dir
-# chmod -R 755 "${RELEASE_DIR}/build"
+chown -R ubuntu:ubuntu "${RELEASES_DIR}" 2>/dev/null || true
+# Use the real path (not the symlink) for chmod to avoid following to wrong dir
+chmod -R 755 "${RELEASE_DIR}/build"
 
 # ── 5. Prune old releases ────────────────────────────────────
 echo "[5/5] Pruning old releases (keeping last ${KEEP_RELEASES})..."

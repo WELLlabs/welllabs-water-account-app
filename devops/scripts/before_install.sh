@@ -10,7 +10,9 @@ echo "========================================"
 
 # ── 1. Create required directories ──────────────────────────
 echo "[1/4] Creating base directories..."
-mkdir -p /opt/welllabs/{releases,current,logs}
+mkdir -p /opt/welllabs/{releases,logs}
+# NOTE: 'current' must NOT be pre-created as a directory.
+# after_install.sh creates it as a symlink via: ln -sfn <release_dir> /opt/welllabs/current
 
 # ── 2. Unblock apt/dpkg locks ───────────────────────────────
 echo "[2/4] Stopping unattended-upgrades if active..."
