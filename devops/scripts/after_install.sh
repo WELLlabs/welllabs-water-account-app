@@ -44,20 +44,20 @@ echo "  → build/index.html confirmed."
 # ──────────────────────────────────────────────────────────────────────────────
 # Nginx & systemd configs
 # ──────────────────────────────────────────────────────────────────────────────
-echo "Installing Nginx & systemd configs..."
+# echo "Installing Nginx & systemd configs..."
 
-cp /etc/nginx/conf.d/welllabs.conf /etc/nginx/conf.d/welllabs.conf.bak 2>/dev/null || true
+# cp /etc/nginx/conf.d/welllabs.conf /etc/nginx/conf.d/welllabs.conf.bak 2>/dev/null || true
 
-cp "$RELEASE_DIR/devops/nginx/welllabs.conf" /etc/nginx/conf.d/welllabs.conf
-rm -f /etc/nginx/conf.d/default.conf
-rm -f /etc/nginx/sites-enabled/default
+# cp "$RELEASE_DIR/devops/nginx/welllabs.conf" /etc/nginx/conf.d/welllabs.conf
+# rm -f /etc/nginx/conf.d/default.conf
+# rm -f /etc/nginx/sites-enabled/default
 
-if ! nginx -t; then
-  echo "ERROR: Nginx config invalid — restoring previous config..."
-  mv /etc/nginx/conf.d/welllabs.conf.bak /etc/nginx/conf.d/welllabs.conf
-  exit 1
-fi
-rm -f /etc/nginx/conf.d/welllabs.conf.bak
+# if ! nginx -t; then
+#   echo "ERROR: Nginx config invalid — restoring previous config..."
+#   mv /etc/nginx/conf.d/welllabs.conf.bak /etc/nginx/conf.d/welllabs.conf
+#   exit 1
+# fi
+# rm -f /etc/nginx/conf.d/welllabs.conf.bak
 
 # ── 4. Atomic symlink swap ───────────────────────────────────
 echo "[4/5] Swapping symlink: current → ${RELEASE_NAME}"

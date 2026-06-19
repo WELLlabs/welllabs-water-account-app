@@ -21,7 +21,7 @@ fi
 echo "  → Nginx is active."
 
 # ── 2. HTTP response from Nginx ──────────────────────────────
-# Port 80 redirects to 443 (301) — accept 2xx and 3xx as healthy.
+# Port 80 serves the app directly — accept 2xx and 3xx as healthy.
 echo "[2/3] Polling http://127.0.0.1/ ..."
 ATTEMPT=0
 until HTTP_CODE=$(curl --silent -o /dev/null -w "%{http_code}" \
