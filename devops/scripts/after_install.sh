@@ -40,10 +40,10 @@ if [ ! -f "${RELEASE_DIR}/build/index.html" ]; then
 fi
 echo "  → build/index.html confirmed."
 
-── 3. Install / update Nginx configuration ─────────────────
-──────────────────────────────────────────────────────────────────────────────
-Nginx & systemd configs
-──────────────────────────────────────────────────────────────────────────────
+# ── 3. Install / update Nginx configuration ─────────────────
+# ──────────────────────────────────────────────────────────────────────────────
+# Nginx & systemd configs
+# ──────────────────────────────────────────────────────────────────────────────
 echo "Installing Nginx & systemd configs..."
 
 cp /etc/nginx/conf.d/welllabs.conf /etc/nginx/conf.d/welllabs.conf.bak 2>/dev/null || true
