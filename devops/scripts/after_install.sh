@@ -40,36 +40,24 @@ if [ ! -f "${RELEASE_DIR}/build/index.html" ]; then
 fi
 echo "  → build/index.html confirmed."
 
-# ── 3. Install / update Nginx configuration ─────────────────
-# echo "[3/5] Configuring Nginx..."
-# cp "${RELEASE_DIR}/devops/nginx/welllabs.conf" "${NGINX_AVAILABLE}"
+── 3. Install / update Nginx configuration ─────────────────
+──────────────────────────────────────────────────────────────────────────────
+Nginx & systemd configs
+──────────────────────────────────────────────────────────────────────────────
+echo "Installing Nginx & systemd configs..."
 
-# if [ ! -L "${NGINX_ENABLED}" ]; then
-#   ln -s "${NGINX_AVAILABLE}" "${NGINX_ENABLED}"
-#   echo "  → Nginx site enabled."
-# fi
+cp /etc/nginx/conf.d/welllabs.conf /etc/nginx/conf.d/welllabs.conf.bak 2>/dev/null || true
 
-# if [ -L /etc/nginx/sites-enabled/default ]; then
-#   rm /etc/nginx/sites-enabled/default
-#   echo "  → Removed Nginx default site."
-# fi
+cp "$RELEASE_DIR/devops/nginx/welllabs.conf" /etc/nginx/conf.d/welllabs.conf
+rm -f /etc/nginx/conf.d/default.conf
+rm -f /etc/nginx/sites-enabled/default
 
-# # Generate self-signed SSL cert once
-# if [ ! -f /etc/nginx/ssl/selfsigned.crt ]; then
-#   echo "  → Generating self-signed SSL certificate..."
-#   mkdir -p /etc/nginx/ssl
-#   chmod 700 /etc/nginx/ssl
-#   openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
-#     -keyout /etc/nginx/ssl/selfsigned.key \
-#     -out    /etc/nginx/ssl/selfsigned.crt \
-#     -subj   "/C=IN/ST=Karnataka/L=Bengaluru/O=WellLabs/CN=welllabs.local"
-#   # Private key must NOT be world-readable
-#   chmod 600 /etc/nginx/ssl/selfsigned.key
-#   chmod 644 /etc/nginx/ssl/selfsigned.crt
-# fi
-
-# nginx -t
-# echo "  → Nginx config test passed."
+if ! nginx -t; then
+  echo "ERROR: Nginx config invalid — restoring previous config..."
+  mv /etc/nginx/conf.d/welllabs.conf.bak /etc/nginx/conf.d/welllabs.conf
+  exit 1
+fi
+rm -f /etc/nginx/conf.d/welllabs.conf.bak
 
 # ── 4. Atomic symlink swap ───────────────────────────────────
 echo "[4/5] Swapping symlink: current → ${RELEASE_NAME}"
