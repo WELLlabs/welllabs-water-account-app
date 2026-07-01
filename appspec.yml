@@ -1,0 +1,47 @@
+version: 0.0
+os: linux
+
+# ============================================================
+#  WELL LABS — AWS CodeDeploy AppSpec
+#  App Type  : SvelteKit SPA (static — ssr = false)
+#  Web Server : Nginx (serves build/ directly from disk)
+#  Strategy  : Releases directory + atomic symlink swap
+# ============================================================
+
+files:
+  - source: /
+    destination: /opt/welllabs/package
+
+permissions:
+  - object: /opt/welllabs/package
+    pattern: "**"
+    owner: ubuntu
+    group: ubuntu
+    type:
+      - file
+      - directory
+
+hooks:
+  # Prepare release directory, handle apt locks
+  BeforeInstall:
+    - location: devops/scripts/before_install.sh
+      timeout: 180
+      runas: root
+
+  # Copy build → release dir, update Nginx config, atomic symlink swap
+  AfterInstall:
+    - location: devops/scripts/after_install.sh
+      timeout: 120
+      runas: root
+
+  # Graceful nginx reload (no Node.js to restart — pure static)
+  ApplicationStart:
+    - location: devops/scripts/application_start.sh
+      timeout: 60
+      runas: root
+
+  # Health checks — fail → CodeDeploy auto-rollback
+  ValidateService:
+    - location: devops/scripts/validate_service.sh
+      timeout: 60
+      runas: root

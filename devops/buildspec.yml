@@ -1,0 +1,50 @@
+version: 0.2
+
+# ============================================================
+#  WELL LABS — AWS CodeBuild Buildspec
+#  App     : SvelteKit SPA (ssr = false → adapter-static)
+#  Output  : Pure static files in build/
+#  No backend, no env vars, no secrets required at build time.
+# ============================================================
+
+phases:
+  install:
+    runtime-versions:
+      nodejs: 20
+    commands:
+      - echo "=== [INSTALL] Installing npm dependencies ==="
+      - npm install --prefer-offline
+
+  build:
+    commands:
+      - echo "=== [BUILD] Building SvelteKit static site ==="
+      - npm run build
+      - echo "Build complete."
+      - echo "  → Built files:"
+      - ls -lh build/
+
+  post_build:
+    commands:
+      - echo "=== [POST-BUILD] Assembling deployment artifact ==="
+      # Only ship what CodeDeploy needs:
+      #   build/      → static site (index.html, _app/, assets)
+      #   devops/     → nginx config + lifecycle scripts
+      #   appspec.yml → CodeDeploy entry point
+      - mkdir -p deploy_artifact
+      - cp -r build     deploy_artifact/
+      - cp -r devops    deploy_artifact/
+      - cp appspec.yml  deploy_artifact/
+      # Make all shell scripts executable inside the artifact
+      - chmod +x deploy_artifact/devops/scripts/*.sh || true
+      - echo "Artifact contents:"
+      - find deploy_artifact -type f | sort
+
+artifacts:
+  base-directory: deploy_artifact
+  files:
+    - "**/*"
+  discard-paths: no
+
+cache:
+  paths:
+    - node_modules/**/*
