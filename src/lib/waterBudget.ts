@@ -43,6 +43,129 @@ export interface MonthlyWaterNeed {
 	waterMm: number;
 }
 
+export type CropSeason = 'Kharif' | 'Rabi';
+
+const MONTH_NAMES = [
+	'january',
+	'february',
+	'march',
+	'april',
+	'may',
+	'june',
+	'july',
+	'august',
+	'september',
+	'october',
+	'november',
+	'december'
+] as const;
+
+export function seasonColumnPrefix(season: string): 'k' | 'r' {
+	return season.toLowerCase().startsWith('rabi') ? 'r' : 'k';
+}
+
+export function waterColumnName(
+	season: string,
+	calendarMonth: number,
+	calendarYear: number
+): string {
+	const prefix = seasonColumnPrefix(season);
+	const month = MONTH_NAMES[calendarMonth] ?? 'january';
+	return `${prefix}_${month}_${calendarYear}`;
+}
+
+export function buildWaterColumnValues(
+	schedule: WaterSchedule | undefined
+): Record<string, number> {
+	if (!schedule?.matchedBudget) return {};
+
+	const values: Record<string, number> = {};
+	for (const need of getExportableMonthNeeds(schedule)) {
+		values[waterColumnName(schedule.season, need.calendarMonth, need.calendarYear)] = round2(
+			need.waterMm
+		);
+	}
+	return values;
+}
+
+export function collectWaterColumnNames(
+	features: Array<{ properties: { waterSchedule?: WaterSchedule } }>
+): string[] {
+	const names = new Set<string>();
+	let maxSowingYear = 0;
+
+	for (const feature of features) {
+		const schedule = feature.properties.waterSchedule;
+		if (!schedule?.matchedBudget) continue;
+
+		const sowingYear = schedule.sowingDate ? Number(schedule.sowingDate.slice(0, 4)) : 0;
+		if (sowingYear > maxSowingYear) maxSowingYear = sowingYear;
+
+		for (const need of getExportableMonthNeeds(schedule)) {
+			names.add(waterColumnName(schedule.season, need.calendarMonth, need.calendarYear));
+		}
+	}
+
+	// Exclude columns from years before the most recent sowing year.
+	// This prevents stale columns (e.g. one outlier 2025 plot) from creating
+	// null-filled columns across all other features.
+	const filtered =
+		maxSowingYear > 0
+			? [...names].filter((col) => {
+					const year = Number(col.split('_').pop());
+					return year >= maxSowingYear;
+				})
+			: [...names];
+
+	// Sort chronologically (year first, then calendar month index within the year)
+	return filtered.sort((a, b) => {
+		const parseCol = (col: string) => {
+			const parts = col.split('_');
+			const year = Number(parts[parts.length - 1]);
+			const monthName = parts[parts.length - 2];
+			const monthIdx = MONTH_NAMES.indexOf(monthName as (typeof MONTH_NAMES)[number]);
+			return year * 100 + (monthIdx >= 0 ? monthIdx : 0);
+		};
+		return parseCol(a) - parseCol(b);
+	});
+}
+
+function round2(value: number): number {
+	return Math.round(value * 100) / 100;
+}
+
+export function roundWaterValue(value: number): number {
+	return round2(value);
+}
+
+function parseLocalDate(dateStr: string): Date | null {
+	const match = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
+	if (!match) return null;
+	return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+}
+
+function monthYearValue(calendarYear: number, calendarMonth: number): number {
+	return calendarYear * 100 + calendarMonth;
+}
+
+export function getExportableMonthNeeds(schedule: WaterSchedule): MonthlyWaterNeed[] {
+	if (!schedule.matchedBudget) return [];
+
+	if (!schedule.sowingDate) {
+		return schedule.monthlyNeeds;
+	}
+
+	const sowingDate = parseLocalDate(schedule.sowingDate);
+	if (!sowingDate) {
+		return schedule.monthlyNeeds;
+	}
+
+	const sowingValue = monthYearValue(sowingDate.getFullYear(), sowingDate.getMonth());
+	return schedule.monthlyNeeds.filter(
+		(need) => monthYearValue(need.calendarYear, need.calendarMonth) >= sowingValue
+	);
+}
+
 export interface WaterSchedule {
 	crop: string;
 	season: string;
@@ -218,6 +341,80 @@ function findBudgetRow(crop: string, sowingDate: Date, budget: WaterBudgetRow[])
 	return best;
 }
 
+function findBudgetRowBySeason(
+	crop: string,
+	season: CropSeason,
+	budget: WaterBudgetRow[]
+): WaterBudgetRow | null {
+	if (!crop?.trim()) return null;
+
+	const normalized = normalizeCropName(crop);
+	const seasonLower = season.toLowerCase();
+
+	return (
+		budget.find(
+			(row) =>
+				normalizeCropName(row.crop) === normalized && row.season.toLowerCase() === seasonLower
+		) ?? null
+	);
+}
+
+function seasonReferenceYear(sowingDate: Date, seasonStartMonth: number): number {
+	const sowingYear = sowingDate.getFullYear();
+	const sowingMonth = sowingDate.getMonth();
+
+	// Rabi seasons start in late year; sowing in Jan–Mar belongs to season that started previous calendar year.
+	if (sowingMonth < seasonStartMonth && seasonStartMonth >= 10 && sowingMonth < 4) {
+		return sowingYear - 1;
+	}
+
+	return sowingYear;
+}
+
+function resolveEndBudgetIndex(budgetRow: WaterBudgetRow): number {
+	const endParsed = parseMonthDay(budgetRow.endMonth);
+	return CALENDAR_TO_BUDGET_INDEX[endParsed.month];
+}
+
+function buildMonthlyNeedsFromBudgetRow(
+	budgetRow: WaterBudgetRow,
+	startBudgetIndex: number,
+	endBudgetIndex: number,
+	plotAcres: number,
+	referenceYear: number
+): MonthlyWaterNeed[] {
+	const monthlyNeeds: MonthlyWaterNeed[] = [];
+	let currentIndex = startBudgetIndex;
+	let year = referenceYear;
+	let previousCalendarMonth = budgetIndexToCalendarMonth(startBudgetIndex);
+	let steps = 0;
+
+	while (steps < 12) {
+		const budgetMonth = BUDGET_MONTHS[currentIndex];
+		const calendarMonth = budgetIndexToCalendarMonth(currentIndex);
+
+		if (steps > 0 && calendarMonth < previousCalendarMonth) {
+			year += 1;
+		}
+		previousCalendarMonth = calendarMonth;
+
+		monthlyNeeds.push({
+			month: budgetMonth,
+			calendarMonth,
+			calendarYear: year,
+			waterMmPerAcre: budgetRow.monthlyWater[budgetMonth],
+			waterMm: budgetRow.monthlyWater[budgetMonth] * plotAcres
+		});
+
+		if (currentIndex === endBudgetIndex) break;
+
+		currentIndex = (currentIndex + 1) % 12;
+		steps += 1;
+	}
+
+	return monthlyNeeds;
+}
+
 function isDateInSeason(
 	month: number,
 	day: number,
@@ -244,8 +441,8 @@ export function calculateWaterSchedule(
 	acres = 1
 ): WaterSchedule {
 	const plotAcres = Number.isFinite(acres) && acres > 0 ? acres : 1;
-	const sowingDate = new Date(sowingDateStr);
-	if (Number.isNaN(sowingDate.getTime())) {
+	const sowingDate = parseLocalDate(sowingDateStr);
+	if (!sowingDate) {
 		return {
 			crop,
 			season: '',
@@ -274,37 +471,93 @@ export function calculateWaterSchedule(
 		};
 	}
 
-	const startBudgetIndex = CALENDAR_TO_BUDGET_INDEX[sowingDate.getMonth()];
-	const endParsed = parseMonthDay(budgetRow.endMonth);
-	const endBudgetIndex = CALENDAR_TO_BUDGET_INDEX[endParsed.month];
+	const seasonStartParsed = parseMonthDay(budgetRow.startMonth);
+	const seasonStartBudgetIndex = CALENDAR_TO_BUDGET_INDEX[seasonStartParsed.month];
+	const endBudgetIndex = resolveEndBudgetIndex(budgetRow);
+	const referenceYear = seasonReferenceYear(sowingDate, seasonStartParsed.month);
 
-	const monthlyNeeds: MonthlyWaterNeed[] = [];
-	let currentIndex = startBudgetIndex;
-	let year = sowingDate.getFullYear();
-	let previousCalendarMonth = sowingDate.getMonth();
+	const monthlyNeeds = buildMonthlyNeedsFromBudgetRow(
+		budgetRow,
+		seasonStartBudgetIndex,
+		endBudgetIndex,
+		plotAcres,
+		referenceYear
+	);
 
-	for (let step = 0; step < 12; step++) {
-		const budgetMonth = BUDGET_MONTHS[currentIndex];
-		const calendarMonth = budgetIndexToCalendarMonth(currentIndex);
+	const visibleNeeds = getExportableMonthNeeds({
+		crop,
+		season: budgetRow.season,
+		sowingDate: sowingDateStr,
+		acres: plotAcres,
+		monthlyNeeds,
+		totalWaterMmPerAcre: 0,
+		totalWaterMm: 0,
+		matchedBudget: true
+	});
+	const totalWaterMmPerAcre = visibleNeeds.reduce((sum, item) => sum + item.waterMmPerAcre, 0);
+	const totalWaterMm = totalWaterMmPerAcre * plotAcres;
 
-		if (calendarMonth < previousCalendarMonth) {
-			year += 1;
-		}
-		previousCalendarMonth = calendarMonth;
+	return {
+		crop,
+		season: budgetRow.season,
+		sowingDate: sowingDateStr,
+		acres: plotAcres,
+		monthlyNeeds,
+		totalWaterMmPerAcre,
+		totalWaterMm,
+		matchedBudget: true
+	};
+}
 
-		monthlyNeeds.push({
-			month: budgetMonth,
-			calendarMonth,
-			calendarYear: year,
-			waterMmPerAcre: budgetRow.monthlyWater[budgetMonth],
-			waterMm: budgetRow.monthlyWater[budgetMonth] * plotAcres
-		});
+export function calculateWaterScheduleBySeason(
+	crop: string,
+	season: CropSeason,
+	budget: WaterBudgetRow[],
+	acres = 1,
+	referenceYear = new Date().getFullYear()
+): WaterSchedule {
+	const plotAcres = Number.isFinite(acres) && acres > 0 ? acres : 1;
+	const budgetRow = findBudgetRowBySeason(crop, season, budget);
 
-		if (currentIndex === endBudgetIndex) break;
-		currentIndex = (currentIndex + 1) % 12;
+	if (!budgetRow) {
+		return {
+			crop,
+			season,
+			sowingDate: '',
+			acres: plotAcres,
+			monthlyNeeds: [],
+			totalWaterMmPerAcre: 0,
+			totalWaterMm: 0,
+			matchedBudget: false,
+			note: `No ${season} water budget found for crop "${crop}"`
+		};
 	}
 
-	const totalWaterMmPerAcre = monthlyNeeds.reduce((sum, item) => sum + item.waterMmPerAcre, 0);
+	const startParsed = parseMonthDay(budgetRow.startMonth);
+	const endParsed = parseMonthDay(budgetRow.endMonth);
+	const startBudgetIndex = CALENDAR_TO_BUDGET_INDEX[startParsed.month];
+	const endBudgetIndex = resolveEndBudgetIndex(budgetRow);
+	const sowingDateStr = `${referenceYear}-${String(startParsed.month + 1).padStart(2, '0')}-${String(startParsed.day).padStart(2, '0')}`;
+
+	const monthlyNeeds = buildMonthlyNeedsFromBudgetRow(
+		budgetRow,
+		startBudgetIndex,
+		endBudgetIndex,
+		plotAcres,
+		referenceYear
+	);
+
+	const visibleNeeds = getExportableMonthNeeds({
+		crop,
+		season: budgetRow.season,
+		sowingDate: sowingDateStr,
+		acres: plotAcres,
+		monthlyNeeds,
+		totalWaterMmPerAcre: 0,
+		totalWaterMm: 0,
+		matchedBudget: true
+	});
+	const totalWaterMmPerAcre = visibleNeeds.reduce((sum, item) => sum + item.waterMmPerAcre, 0);
 	const totalWaterMm = totalWaterMmPerAcre * plotAcres;
 
 	return {

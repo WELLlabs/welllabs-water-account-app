@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import type { FarmFeatureProperties } from '$lib/gpkgParser';
-	import { formatCalendarMonth } from '$lib/waterBudget';
+	import { formatCalendarMonth, getExportableMonthNeeds, roundWaterValue } from '$lib/waterBudget';
 
 	interface Props {
 		geojson: GeoJSON.FeatureCollection | null;
@@ -95,230 +95,149 @@
 	}
 </script>
 
-<div class="layout">
-	<div class="map-panel">
-		<div bind:this={mapContainer} class="map"></div>
+<div
+	class="grid h-[calc(100vh-120px)] grid-cols-1 overflow-hidden rounded-xl border border-slate-200 bg-white max-[900px]:h-auto max-[900px]:grid-cols-1 min-[901px]:grid-cols-[1fr_360px]"
+>
+	<div class="relative min-h-[400px] max-[900px]:h-[50vh]">
+		<div bind:this={mapContainer} class="h-full w-full"></div>
 	</div>
 
-	<aside class="details-panel">
+	<aside
+		class="overflow-y-auto border-slate-200 bg-slate-50 p-5 min-[901px]:border-l max-[900px]:border-t"
+	>
 		{#if selectedFeature}
 			{@const p = featureProps(selectedFeature)}
-			<h2>Farm Plot Details</h2>
+			<h2 class="mb-4 text-xl font-semibold text-slate-900">Farm Plot Details</h2>
 
-			<dl class="details">
+			<dl class="grid gap-3">
 				{#if p.FarmerName}
-					<div><dt>Farmer</dt><dd>{p.FarmerName}</dd></div>
+					<div class="grid grid-cols-[110px_1fr] gap-2">
+						<dt class="text-xs font-semibold uppercase tracking-wide text-slate-500">Farmer</dt>
+						<dd class="text-slate-900">{p.FarmerName}</dd>
+					</div>
 				{/if}
 				{#if p.Village}
-					<div><dt>Village</dt><dd>{p.Village}</dd></div>
+					<div class="grid grid-cols-[110px_1fr] gap-2">
+						<dt class="text-xs font-semibold uppercase tracking-wide text-slate-500">Village</dt>
+						<dd class="text-slate-900">{p.Village}</dd>
+					</div>
 				{/if}
 				{#if p.UniqueId}
-					<div><dt>Plot ID</dt><dd>{p.UniqueId}</dd></div>
+					<div class="grid grid-cols-[110px_1fr] gap-2">
+						<dt class="text-xs font-semibold uppercase tracking-wide text-slate-500">Plot ID</dt>
+						<dd class="text-slate-900">{p.UniqueId}</dd>
+					</div>
 				{/if}
-				{#if p.CROP_26_K}
-					<div><dt>Crop (Kharif 2026)</dt><dd>{p.CROP_26_K}</dd></div>
+				{#if p.crop}
+					<div class="grid grid-cols-[110px_1fr] gap-2">
+						<dt class="text-xs font-semibold uppercase tracking-wide text-slate-500">Crop</dt>
+						<dd class="text-slate-900">{p.crop}</dd>
+					</div>
 				{/if}
-				{#if p.Sowing_Date}
-					<div><dt>Sowing Date</dt><dd>{p.Sowing_Date}</dd></div>
+				{#if p.sowingDate}
+					<div class="grid grid-cols-[110px_1fr] gap-2">
+						<dt class="text-xs font-semibold uppercase tracking-wide text-slate-500">Sowing Date</dt>
+						<dd class="text-slate-900">{p.sowingDate}</dd>
+					</div>
+				{:else if p.waterSchedule?.season}
+					<div class="grid grid-cols-[110px_1fr] gap-2">
+						<dt class="text-xs font-semibold uppercase tracking-wide text-slate-500">Season</dt>
+						<dd class="text-slate-900">{p.waterSchedule.season} (from fallback)</dd>
+					</div>
 				{/if}
-				{#if p.Acre}
-					<div><dt>Area</dt><dd>{p.Acre.toFixed(2)} acres</dd></div>
+				{#if p.acres}
+					<div class="grid grid-cols-[110px_1fr] gap-2">
+						<dt class="text-xs font-semibold uppercase tracking-wide text-slate-500">Area</dt>
+						<dd class="text-slate-900">{p.acres.toFixed(2)} acres</dd>
+					</div>
 				{/if}
 				{#if p.IR_Status}
-					<div><dt>IR Status</dt><dd>{p.IR_Status}</dd></div>
+					<div class="grid grid-cols-[110px_1fr] gap-2">
+						<dt class="text-xs font-semibold uppercase tracking-wide text-slate-500">IR Status</dt>
+						<dd class="text-slate-900">{p.IR_Status}</dd>
+					</div>
 				{/if}
 			</dl>
 
 			{#if p.waterSchedule}
-				<section class="water-section">
-					<h3>Monthly Water Requirements</h3>
+				<section class="mt-5">
+					<h3 class="mb-3 text-base font-semibold text-slate-800">Monthly Water Requirements</h3>
 					{#if p.waterSchedule.matchedBudget}
-						<p class="season-label">
+						{@const exportableNeeds = getExportableMonthNeeds(p.waterSchedule)}
+						{@const exportableTotalPerAcre = exportableNeeds.reduce(
+							(sum, item) => sum + item.waterMmPerAcre,
+							0
+						)}
+						{@const exportableTotal = exportableTotalPerAcre * p.waterSchedule.acres}
+						<p class="mb-3 text-sm text-slate-600">
 							Season: <strong>{p.waterSchedule.season}</strong> · Area:
 							<strong>{p.waterSchedule.acres.toFixed(2)} acres</strong>
 						</p>
-						<table>
-							<thead>
-								<tr>
-									<th>Month</th>
-									<th>Water per acre (mm)</th>
-									<th>Total water (mm)</th>
-								</tr>
-							</thead>
-							<tbody>
-								{#each p.waterSchedule.monthlyNeeds as need}
+						<div class="overflow-hidden rounded-lg bg-white shadow-sm">
+							<table class="w-full border-collapse text-sm">
+								<thead>
 									<tr>
-										<td>{formatCalendarMonth(need.calendarMonth, need.calendarYear)}</td>
-										<td>{need.waterMmPerAcre.toFixed(2)}</td>
-										<td>{need.waterMm.toFixed(2)}</td>
+										<th
+											class="border-b border-slate-200 bg-blue-50 px-3 py-2 text-left font-semibold text-blue-800"
+											>Month</th
+										>
+										<th
+											class="border-b border-slate-200 bg-blue-50 px-3 py-2 text-right font-semibold text-blue-800"
+											>Water per acre (mm)</th
+										>
+										<th
+											class="border-b border-slate-200 bg-blue-50 px-3 py-2 text-right font-semibold text-blue-800"
+											>Total water (mm)</th
+										>
 									</tr>
-								{/each}
-							</tbody>
-							<tfoot>
-								<tr>
-									<th>Total</th>
-									<td>{p.waterSchedule.totalWaterMmPerAcre.toFixed(2)}</td>
-									<td>{p.waterSchedule.totalWaterMm.toFixed(2)}</td>
-								</tr>
-							</tfoot>
-						</table>
+								</thead>
+								<tbody>
+									{#each exportableNeeds as need}
+										<tr>
+											<td class="border-b border-slate-200 px-3 py-2 text-left text-slate-900">
+												{formatCalendarMonth(need.calendarMonth, need.calendarYear)}
+											</td>
+											<td class="border-b border-slate-200 px-3 py-2 text-right text-slate-900">
+												{roundWaterValue(need.waterMmPerAcre).toFixed(2)}
+											</td>
+											<td class="border-b border-slate-200 px-3 py-2 text-right text-slate-900">
+												{roundWaterValue(need.waterMm).toFixed(2)}
+											</td>
+										</tr>
+									{/each}
+								</tbody>
+								<tfoot>
+									<tr>
+										<th
+											class="border-t-2 border-slate-300 bg-slate-50 px-3 py-2 text-left font-semibold text-slate-900"
+											>Total</th
+										>
+										<td
+											class="border-t-2 border-slate-300 bg-slate-50 px-3 py-2 text-right font-semibold text-slate-900"
+										>
+											{roundWaterValue(exportableTotalPerAcre).toFixed(2)}
+										</td>
+										<td
+											class="border-t-2 border-slate-300 bg-slate-50 px-3 py-2 text-right font-semibold text-slate-900"
+										>
+											{roundWaterValue(exportableTotal).toFixed(2)}
+										</td>
+									</tr>
+								</tfoot>
+							</table>
+						</div>
 					{:else}
-						<p class="warning">{p.waterSchedule.note ?? 'Unable to calculate water budget.'}</p>
+						<p class="rounded-lg bg-amber-100 px-3 py-3 text-sm text-amber-800">
+							{p.waterSchedule.note ?? 'Unable to calculate water budget.'}
+						</p>
 					{/if}
 				</section>
 			{/if}
 		{:else}
-			<div class="empty-state">
-				<h2>Select a plot</h2>
+			<div class="text-slate-500">
+				<h2 class="mb-4 text-xl font-semibold text-slate-700">Select a plot</h2>
 				<p>Click any polygon on the map to view farm details and monthly water requirements.</p>
 			</div>
 		{/if}
 	</aside>
 </div>
-
-<style>
-	.layout {
-		display: grid;
-		grid-template-columns: 1fr 360px;
-		height: calc(100vh - 120px);
-		gap: 0;
-		border: 1px solid #e2e8f0;
-		border-radius: 12px;
-		overflow: hidden;
-		background: #fff;
-	}
-
-	.map-panel {
-		position: relative;
-		min-height: 400px;
-	}
-
-	.map {
-		width: 100%;
-		height: 100%;
-	}
-
-	.details-panel {
-		padding: 1.25rem;
-		overflow-y: auto;
-		border-left: 1px solid #e2e8f0;
-		background: #f8fafc;
-	}
-
-	h2 {
-		margin: 0 0 1rem;
-		font-size: 1.25rem;
-		color: #0f172a;
-	}
-
-	h3 {
-		margin: 1.25rem 0 0.75rem;
-		font-size: 1rem;
-		color: #1e293b;
-	}
-
-	.details {
-		display: grid;
-		gap: 0.75rem;
-		margin: 0;
-	}
-
-	.details div {
-		display: grid;
-		grid-template-columns: 110px 1fr;
-		gap: 0.5rem;
-	}
-
-	dt {
-		margin: 0;
-		font-size: 0.8rem;
-		font-weight: 600;
-		color: #64748b;
-		text-transform: uppercase;
-		letter-spacing: 0.03em;
-	}
-
-	dd {
-		margin: 0;
-		color: #0f172a;
-	}
-
-	.season-label {
-		margin: 0 0 0.75rem;
-		font-size: 0.9rem;
-		color: #475569;
-	}
-
-	table {
-		width: 100%;
-		border-collapse: collapse;
-		font-size: 0.875rem;
-		background: #fff;
-		border-radius: 8px;
-		overflow: hidden;
-		box-shadow: 0 1px 3px rgb(15 23 42 / 8%);
-	}
-
-	th,
-	td {
-		padding: 0.5rem 0.75rem;
-		text-align: left;
-		border-bottom: 1px solid #e2e8f0;
-	}
-
-	th:not(:first-child),
-	td:not(:first-child) {
-		text-align: right;
-	}
-
-	th {
-		background: #eff6ff;
-		color: #1e40af;
-		font-weight: 600;
-	}
-
-	tr:last-child td {
-		border-bottom: none;
-	}
-
-	tfoot th,
-	tfoot td {
-		background: #f8fafc;
-		font-weight: 600;
-		color: #0f172a;
-		border-top: 2px solid #cbd5e1;
-	}
-
-	.warning {
-		margin: 0;
-		padding: 0.75rem;
-		border-radius: 8px;
-		background: #fef3c7;
-		color: #92400e;
-		font-size: 0.875rem;
-	}
-
-	.empty-state {
-		color: #64748b;
-	}
-
-	.empty-state h2 {
-		color: #334155;
-	}
-
-	@media (max-width: 900px) {
-		.layout {
-			grid-template-columns: 1fr;
-			height: auto;
-		}
-
-		.map-panel {
-			height: 50vh;
-		}
-
-		.details-panel {
-			border-left: none;
-			border-top: 1px solid #e2e8f0;
-		}
-	}
-</style>
