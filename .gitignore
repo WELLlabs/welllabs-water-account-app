@@ -1,4 +1,5 @@
 node_modules
+.vite
 .svelte-kit
 build
 dist
@@ -8,4 +9,20 @@ dist
 !.env.example
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
-NRBC_D10_L1.gpkg
+# Local geospatial inputs and generated project bundles
+*.gpkg
+*.qgz
+*.mbtiles
+*.shp
+*.shx
+*.dbf
+*.prj
+*.cpg
+*.qmd
+*.tif
+*.tiff
+
+api/.venv/
+__pycache__/
+*.pyc
+.Python

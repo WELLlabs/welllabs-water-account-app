@@ -192,8 +192,8 @@ export async function exportPdf(geojson: ProcessedGeoJson): Promise<Blob> {
 		const schedule = props.waterSchedule;
 		if (schedule?.matchedBudget) {
 			const needs = getExportableMonthNeeds(schedule);
-			const totalPerAcre = needs.reduce((sum, item) => sum + item.waterMmPerAcre, 0);
-			const total = totalPerAcre * schedule.acres;
+			const totalPerAcre = needs.reduce((sum, item) => sum + item.waterM3PerAcre, 0);
+			const total = needs.reduce((sum, item) => sum + item.waterM3, 0);
 
 			doc.setFontSize(9);
 			doc.setTextColor(71, 85, 105);
@@ -207,11 +207,11 @@ export async function exportPdf(geojson: ProcessedGeoJson): Promise<Blob> {
 			autoTable(doc, {
 				startY: y,
 				margin: { left: margin, right: margin },
-				head: [['Month', 'Water per acre (mm)', 'Total water (mm)']],
+				head: [['Month', 'Water per acre (m³)', 'Total water (m³)']],
 				body: needs.map((need) => [
 					formatCalendarMonth(need.calendarMonth, need.calendarYear),
-					roundWaterValue(need.waterMmPerAcre).toFixed(2),
-					roundWaterValue(need.waterMm).toFixed(2)
+					roundWaterValue(need.waterM3PerAcre).toFixed(2),
+					roundWaterValue(need.waterM3).toFixed(2)
 				]),
 				foot: [
 					[

@@ -2,6 +2,7 @@ import { GeoPackage, GeoPackageAPI } from '@ngageoint/geopackage';
 import {
 	calculateWaterSchedule,
 	calculateWaterScheduleBySeason,
+	normalizeSowingDateInput,
 	parseWaterBudgetCsv,
 	type CropSeason,
 	type WaterSchedule
@@ -59,18 +60,8 @@ function getPropertyValue(props: Record<string, unknown>, column: string): unkno
 	return match ? props[match] : undefined;
 }
 
-function formatLocalDateString(date: Date): string {
-	const year = date.getFullYear();
-	const month = String(date.getMonth() + 1).padStart(2, '0');
-	const day = String(date.getDate()).padStart(2, '0');
-	return `${year}-${month}-${day}`;
-}
-
 function formatSowingDate(value: unknown): string {
-	if (value instanceof Date) {
-		return formatLocalDateString(value);
-	}
-	return String(value ?? '');
+	return normalizeSowingDateInput(value);
 }
 
 async function openFeatureDao(file: ArrayBuffer) {
@@ -183,16 +174,13 @@ export async function parseGpkgFile(
 	budgetCsv: string,
 	options: ParseOptions
 ): Promise<ProcessedGeoJson> {
-	const budget = parseWaterBudgetCsv(budgetCsv);
 	const { geoPackage, featureDao } = await openFeatureDao(file);
 
 	try {
 		validateParseOptions(featureDao.columns, options);
 
 		const srs = featureDao.srs;
-		const features: ProcessedGeoJson['features'] = [];
-		const defaultAcres =
-			Number.isFinite(options.defaultAcres) && options.defaultAcres > 0 ? options.defaultAcres : 1;
+		const rawFeatures: GeoJSON.Feature[] = [];
 
 		for (const row of featureDao.queryForEach()) {
 			if (!row) continue;
@@ -202,16 +190,82 @@ export async function parseGpkgFile(
 
 			if (!geoJsonFeature.geometry) continue;
 
-			const rawProps = (geoJsonFeature.properties ?? {}) as Record<string, unknown>;
-			const crop = String(getPropertyValue(rawProps, options.cropColumn) ?? '');
-			const sowingDate = options.sowingDateColumn
-				? formatSowingDate(getPropertyValue(rawProps, options.sowingDateColumn))
-				: '';
-			const acres = resolveAcres(rawProps, options.acresColumn, defaultAcres);
+			rawFeatures.push({
+				type: 'Feature',
+				id: geoJsonFeature.id ?? featureRow.id,
+				geometry: geoJsonFeature.geometry as GeoJSON.Geometry,
+				properties: (geoJsonFeature.properties ?? {}) as Record<string, unknown>
+			});
+		}
 
-			const properties: FarmFeatureProperties = {
+		if (rawFeatures.length === 0) {
+			throw new Error('No features could be read from the GeoPackage.');
+		}
+
+		const tableName = geoPackage.getFeatureTables()[0];
+		return enrichFeatureCollection(
+			{ type: 'FeatureCollection', features: rawFeatures },
+			tableName,
+			budgetCsv,
+			options
+		);
+	} finally {
+		geoPackage.close();
+	}
+}
+
+/** Column names from a FeatureCollection (attribute keys only). */
+export function getGeoJsonColumnNames(fc: GeoJSON.FeatureCollection): string[] {
+	const keys = new Set<string>();
+	for (const f of fc.features) {
+		if (!f.properties) continue;
+		for (const k of Object.keys(f.properties)) {
+			if (!GEOMETRY_COLUMNS.has(k.toLowerCase())) keys.add(k);
+		}
+	}
+	return Array.from(keys);
+}
+
+/**
+ * Attach crop/sowing/acres + water schedules to an already-loaded FeatureCollection
+ * (used for both GeoPackage and shapefile inputs).
+ */
+export function enrichFeatureCollection(
+	fc: GeoJSON.FeatureCollection,
+	tableName: string,
+	budgetCsv: string,
+	options: ParseOptions
+): ProcessedGeoJson {
+	const budget = parseWaterBudgetCsv(budgetCsv);
+	const columnNames = getGeoJsonColumnNames(fc);
+	validateParseOptions(columnNames, options);
+
+	const defaultAcres =
+		Number.isFinite(options.defaultAcres) && options.defaultAcres > 0 ? options.defaultAcres : 1;
+
+	const features: ProcessedGeoJson['features'] = [];
+
+	fc.features.forEach((feature, index) => {
+		if (!feature.geometry) return;
+
+		const rawProps = (feature.properties ?? {}) as Record<string, unknown>;
+		const crop = String(getPropertyValue(rawProps, options.cropColumn) ?? '');
+		const sowingDate = options.sowingDateColumn
+			? formatSowingDate(getPropertyValue(rawProps, options.sowingDateColumn))
+			: '';
+		const acres = resolveAcres(rawProps, options.acresColumn, defaultAcres);
+
+		const fid =
+			typeof feature.id === 'number'
+				? feature.id
+				: Number(rawProps.fid ?? rawProps.FID ?? index + 1);
+
+		features.push({
+			type: 'Feature',
+			geometry: feature.geometry,
+			properties: {
 				...rawProps,
-				fid: Number(geoJsonFeature.id ?? featureRow.id),
+				fid: Number.isFinite(fid) ? fid : index + 1,
 				crop,
 				sowingDate,
 				acres,
@@ -222,27 +276,17 @@ export async function parseGpkgFile(
 					budget,
 					acres
 				)
-			};
+			}
+		});
+	});
 
-			features.push({
-				type: 'Feature',
-				geometry: geoJsonFeature.geometry as GeoJSON.Geometry,
-				properties
-			});
-		}
-
-		if (features.length === 0) {
-			throw new Error('No features could be read from the GeoPackage.');
-		}
-
-		const tableName = geoPackage.getFeatureTables()[0];
-
-		return {
-			type: 'FeatureCollection',
-			tableName,
-			features
-		};
-	} finally {
-		geoPackage.close();
+	if (features.length === 0) {
+		throw new Error('No features could be processed.');
 	}
+
+	return {
+		type: 'FeatureCollection',
+		tableName,
+		features
+	};
 }

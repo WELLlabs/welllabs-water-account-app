@@ -78,7 +78,7 @@ export async function exportGpkgWithWaterData(
 	const columnDefs = [
 		...originalColumnDefs,
 		...waterColumns.map((name) => ({ name, dataType: 'REAL' })),
-		{ name: 'total_water_mm', dataType: 'REAL' }
+		{ name: 'total_water_m3', dataType: 'REAL' }
 	];
 
 	const exportFeatures: GeoJSON.Feature[] = geojson.features.map((feature) => ({
@@ -101,7 +101,7 @@ export async function exportGpkgWithWaterData(
 				minLatitude: bounds.minY,
 				maxLongitude: bounds.maxX,
 				maxLatitude: bounds.maxY
-			},
+			} as never,
 			4326
 		);
 
@@ -114,7 +114,8 @@ export async function exportGpkgWithWaterData(
 }
 
 export function downloadGpkg(bytes: Uint8Array, fileName: string): void {
-	const blob = new Blob([bytes], { type: 'application/geopackage+sqlite3' });
+	const data = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+	const blob = new Blob([data], { type: 'application/geopackage+sqlite3' });
 	downloadBlob(blob, fileName);
 }
 
