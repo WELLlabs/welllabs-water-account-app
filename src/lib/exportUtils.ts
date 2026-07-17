@@ -9,7 +9,11 @@ export const SKIP_EXPORT_KEYS = new Set(['waterSchedule', 'geom', 'geometry']);
 
 export function waterExportBaseName(sourceFileName: string | null): string {
 	if (!sourceFileName) return 'farm_water_export';
-	return sourceFileName.replace(/\.gpkg$/i, '_water');
+	return sourceFileName
+		.replace(/\.(gpkg|zip)$/i, '')
+		.replace(/\/\s*\(.+\)$/, '')
+		.replace(/[^a-zA-Z0-9._-]+/g, '_')
+		.replace(/_+$/, '') + '_water';
 }
 
 export function buildExportRow(
@@ -31,7 +35,7 @@ export function buildExportRow(
 		if (val !== null) totalWater += val as number;
 	}
 
-	exportProps['total_water_mm'] = roundWaterValue(totalWater);
+	exportProps['total_water_m3'] = roundWaterValue(totalWater);
 	return exportProps;
 }
 
@@ -52,7 +56,7 @@ export function getOriginalColumnNames(features: ProcessedGeoJson['features']): 
 
 export function getExportColumnNames(features: ProcessedGeoJson['features']): string[] {
 	const waterColumns = collectWaterColumnNames(features);
-	return [...getOriginalColumnNames(features), ...waterColumns, 'total_water_mm'];
+	return [...getOriginalColumnNames(features), ...waterColumns, 'total_water_m3'];
 }
 
 export function formatExportValue(value: unknown): string {

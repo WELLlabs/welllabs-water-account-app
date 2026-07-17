@@ -1,4 +1,5 @@
 node_modules
+.vite
 .svelte-kit
 build
 dist
@@ -9,3 +10,11 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 NRBC_D10_L1.gpkg
+NRBC_anony.gpkg
+static/D10_UAV.mbtiles
+static/Farm_Survey.qgz
+static/wucs2-TLBC/
+api/.venv/
+__pycache__/
+*.pyc
+.Python

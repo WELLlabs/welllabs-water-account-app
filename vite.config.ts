@@ -4,11 +4,18 @@ import { defineConfig } from 'vite';
 
 export default defineConfig({
 	plugins: [tailwindcss(), sveltekit()],
+	server: {
+		proxy: {
+			'/api': {
+				target: 'http://127.0.0.1:8001',
+				changeOrigin: true
+			}
+		}
+	},
 	optimizeDeps: {
-		include: ['@ngageoint/geopackage'],
+		include: ['@ngageoint/geopackage', 'sql.js'],
 		esbuildOptions: {
-			define: { global: 'globalThis' },
-			external: ['better-sqlite3']
+			define: { global: 'globalThis' }
 		}
 	},
 	worker: {
