@@ -12,8 +12,8 @@ APP_BASE="/opt/welllabs"
 RELEASES_DIR="${APP_BASE}/releases"
 PACKAGE_DIR="${APP_BASE}/package"
 CURRENT_LINK="${APP_BASE}/current"
-NGINX_AVAILABLE="/etc/nginx/sites-available/welllabs"
-NGINX_ENABLED="/etc/nginx/sites-enabled/welllabs"
+# Production has historically used conf.d — keep updating that path only
+NGINX_CONF="/etc/nginx/conf.d/welllabs.conf"
 KEEP_RELEASES=3
 
 # ── 1. Read & validate release name ─────────────────────────
@@ -40,17 +40,33 @@ if [ ! -f "${RELEASE_DIR}/build/index.html" ]; then
 fi
 echo "  → build/index.html confirmed."
 
-# ── 3. Install / update Nginx configuration ─────────────────
-echo "[3/5] Installing Nginx configuration..."
-cp "${RELEASE_DIR}/devops/nginx/welllabs.conf" "${NGINX_AVAILABLE}"
-ln -sfn "${NGINX_AVAILABLE}" "${NGINX_ENABLED}"
+# ── 3. Install / update Nginx configuration (conf.d — legacy path) ─
+echo "[3/5] Installing Nginx configuration to ${NGINX_CONF}..."
+
+# Drop any sites-* copy from a prior failed deploy to avoid duplicate zones
+rm -f /etc/nginx/sites-enabled/welllabs /etc/nginx/sites-available/welllabs
+
+# Backup live conf before overwrite
+if [ -f "${NGINX_CONF}" ]; then
+  cp "${NGINX_CONF}" "${NGINX_CONF}.bak.$(date +%Y%m%d_%H%M%S)"
+  echo "  → Backed up existing ${NGINX_CONF}"
+fi
+
+cp "${RELEASE_DIR}/devops/nginx/welllabs.conf" "${NGINX_CONF}"
 rm -f /etc/nginx/sites-enabled/default
 
 if ! nginx -t; then
-  echo "ERROR: Nginx config invalid — not reloading."
+  echo "ERROR: Nginx config invalid — restoring previous conf if backup exists..."
+  LATEST_BAK=$(ls -1t "${NGINX_CONF}".bak.* 2>/dev/null | head -1 || true)
+  if [ -n "${LATEST_BAK}" ] && [ -f "${LATEST_BAK}" ]; then
+    cp "${LATEST_BAK}" "${NGINX_CONF}"
+    echo "  → Restored ${LATEST_BAK}"
+  fi
   exit 1
 fi
-echo "  → Nginx config installed (client_max_body_size 64m, /api → :8001)."
+
+systemctl reload nginx
+echo "  → Nginx config installed and reloaded (client_max_body_size 64m, /api → :8001)."
 
 # ── 4. Atomic symlink swap ───────────────────────────────────
 echo "[4/5] Swapping symlink: current → ${RELEASE_NAME}"
