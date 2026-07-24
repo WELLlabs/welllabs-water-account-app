@@ -29,6 +29,8 @@
 	"dependencies": {
 		"@ngageoint/geopackage": "^4.2.6",
 		"@turf/area": "^7.3.5",
+		"@turf/helpers": "^7.3.5",
+		"@turf/union": "^7.3.5",
 		"@types/sql.js": "^1.4.11",
 		"jspdf": "^4.2.1",
 		"jspdf-autotable": "^5.0.8",

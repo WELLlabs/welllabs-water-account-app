@@ -76,7 +76,7 @@ Internet basemaps require connectivity in QGIS/QField. MBTiles and GeoTIFF files
 
 ## Water-budget calculation
 
-Each plot is matched to a crop and season in `farm_water_budget.csv`. Sowing date selects the appropriate season, and plot area scales monthly irrigation depth into volume.
+Each plot is matched to a crop in `total_water_needed.csv`. Water is scheduled in relative crop months starting from the plot’s sowing date (month 1 = sowing month). Plot area scales monthly irrigation depth into volume.
 
 ```text
 water per acre (m³) = (depth in mm / 1000) × 4046.8564224
@@ -85,8 +85,21 @@ plot water (m³)     = water per acre × plot area in acres
 
 Displayed and exported values are cubic metres, rounded to two decimal places. Missing or invalid area values default to one acre.
 
-Supported budget crops include Paddy, Cotton, Groundnut, Pulses (Arhar and Gram), Millets (Sorghum and Bajra), Sunflower, and Sesame. Unmatched crops display a warning instead of a schedule.
+Supported budget crops include Paddy, Cotton, Groundnut, Pulses, Millets, Sunflower, Sesame, and Chilli. Unmatched crops display a warning instead of a schedule.
 
 ## Production notes
 
 The frontend build does not embed FastAPI. Production deployments must run the Python API separately and route `/api` to it. Keep QFieldCloud tokens out of source control and environment files out of Git.
+
+Nginx must allow large request bodies for form export (GeoJSON plot boundaries). The shipped config sets `client_max_body_size 64m` and proxies `/api/` to `127.0.0.1:8001`. Without that, uploads fail with **413 Request Entity Too Large**.
+
+To apply immediately on an existing server (before the next deploy):
+
+```bash
+sudo nano /etc/nginx/sites-available/welllabs   # or wherever the site config lives
+# add inside the server { } block:
+#   client_max_body_size 64m;
+# and ensure location /api/ proxies to the FastAPI process
+
+sudo nginx -t && sudo systemctl reload nginx
+```

@@ -1,42 +1,43 @@
 export interface WaterBudgetRow {
 	crop: string;
-	season: string;
-	startMonth: string;
-	endMonth: string;
-	monthlyWater: Record<BudgetMonth, number>;
+	/** m³/acre for relative crop months; null = no requirement that month */
+	monthM3PerAcre: Array<number | null>;
 }
 
+/** Calendar month English name used in schedules / UI */
 export type BudgetMonth =
+	| 'January'
+	| 'February'
+	| 'March'
+	| 'April'
+	| 'May'
 	| 'June'
 	| 'July'
 	| 'August'
 	| 'September'
 	| 'October'
 	| 'November'
-	| 'December'
-	| 'January'
-	| 'February'
-	| 'March'
-	| 'April'
-	| 'May';
+	| 'December';
 
 export const BUDGET_MONTHS: BudgetMonth[] = [
+	'January',
+	'February',
+	'March',
+	'April',
+	'May',
 	'June',
 	'July',
 	'August',
 	'September',
 	'October',
 	'November',
-	'December',
-	'January',
-	'February',
-	'March',
-	'April',
-	'May'
+	'December'
 ];
 
 export interface MonthlyWaterNeed {
 	month: BudgetMonth;
+	/** 1-based month index relative to sowing (month 1 = sowing month) */
+	relativeMonth: number;
 	calendarMonth: number;
 	calendarYear: number;
 	waterMmPerAcre: number;
@@ -121,9 +122,6 @@ export function collectWaterColumnNames(
 		}
 	}
 
-	// Exclude columns from years before the most recent sowing year.
-	// This prevents stale columns (e.g. one outlier 2025 plot) from creating
-	// null-filled columns across all other features.
 	const filtered =
 		maxSowingYear > 0
 			? [...names].filter((col) => {
@@ -132,7 +130,6 @@ export function collectWaterColumnNames(
 				})
 			: [...names];
 
-	// Sort chronologically (year first, then calendar month index within the year)
 	return filtered.sort((a, b) => {
 		const parseCol = (col: string) => {
 			const parts = col.split('_');
@@ -179,7 +176,6 @@ function toLocalDateString(year: number, monthIndex: number, day: number): strin
 /** Excel serial day → local calendar date (Excel epoch 1899-12-30). */
 function fromExcelSerial(serial: number): string | null {
 	if (!Number.isFinite(serial)) return null;
-	// Typical agricultural dates fall ~1990–2040 → serials ~32874–61364
 	if (serial < 30000 || serial > 80000) return null;
 	const utcMs = Date.UTC(1899, 11, 30) + Math.round(serial) * 86400000;
 	const d = new Date(utcMs);
@@ -209,14 +205,11 @@ export function expandTwoDigitYear(yy: number): number {
  * Parse a raw DBF Date (type D, 8 chars) field.
  * Standard values are YYYYMMDD. Many QField exports store space-padded dd/mm/yy
  * digits instead, e.g. "   10710" = 10/7/10, "  110610" = 11/06/10.
- * When `referenceYear` is set (e.g. from SURVEY_DAT) and the parsed year is
- * more than 3 years away, keep day/month and use the reference year.
  */
 export function parseDbfDateFieldRaw(raw: string, referenceYear?: number): string {
 	const trimmed = raw.replace(/\0/g, '').trim();
 	if (!trimmed || /^0+$/.test(trimmed)) return '';
 
-	// Proper DBF date: YYYYMMDD
 	if (/^(19|20)\d{6}$/.test(trimmed)) {
 		return fromYyyymmddNumber(Number(trimmed)) ?? '';
 	}
@@ -228,24 +221,20 @@ export function parseDbfDateFieldRaw(raw: string, referenceYear?: number): strin
 	let yy: number;
 
 	if (trimmed.length >= 6) {
-		// dd/mm/yy
 		const padded = trimmed.padStart(6, '0').slice(-6);
 		day = Number(padded.slice(0, 2));
 		month = Number(padded.slice(2, 4));
 		yy = Number(padded.slice(4, 6));
 	} else if (trimmed.length === 5) {
-		// d/mm/yy (e.g. 20710 → 2/07/10), as written without leading zero on day
 		day = Number(trimmed.slice(0, 1));
 		month = Number(trimmed.slice(1, 3));
 		yy = Number(trimmed.slice(3, 5));
-		// If that month is invalid, try dd/m/yy (e.g. 10710 could be 10/7/10)
 		if (month < 1 || month > 12) {
 			day = Number(trimmed.slice(0, 2));
 			month = Number(trimmed.slice(2, 3));
 			yy = Number(trimmed.slice(3, 5));
 		}
 	} else if (trimmed.length === 4) {
-		// d/m/yy
 		day = Number(trimmed.slice(0, 1));
 		month = Number(trimmed.slice(1, 2));
 		yy = Number(trimmed.slice(2, 4));
@@ -268,8 +257,6 @@ export function parseDbfDateFieldRaw(raw: string, referenceYear?: number): strin
 
 /**
  * Normalize any common sowing-date representation to `YYYY-MM-DD`.
- * Handles Date objects, ISO strings, DBF YYYYMMDD, DD/MM/YY, DD/MM/YYYY, and Excel serials.
- * Returns '' when the value cannot be interpreted as a plausible sowing date.
  */
 export function normalizeSowingDateInput(value: unknown): string {
 	if (value === null || value === undefined || value === '') return '';
@@ -277,7 +264,6 @@ export function normalizeSowingDateInput(value: unknown): string {
 	if (value instanceof Date) {
 		if (Number.isNaN(value.getTime())) return '';
 		const year = value.getFullYear();
-		// Reject Excel-epoch leftovers and other nonsense years
 		if (!isPlausibleSowingYear(year)) return '';
 		return toLocalDateString(year, value.getMonth(), value.getDate()) ?? '';
 	}
@@ -289,30 +275,25 @@ export function normalizeSowingDateInput(value: unknown): string {
 	const raw = String(value).trim();
 	if (!raw) return '';
 
-	// Already ISO date or datetime
 	const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
 	if (iso) {
 		return toLocalDateString(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3])) ?? '';
 	}
 
-	// Compact YYYYMMDD
 	if (/^(19|20)\d{6}$/.test(raw)) {
 		return fromYyyymmddNumber(Number(raw)) ?? '';
 	}
 
-	// DBF-style padded dd/mm/yy digits (e.g. "   20710" or "020710")
 	if (/^\d{5,8}$/.test(raw) && !/^(19|20)\d{6}$/.test(raw)) {
 		const fromDbf = parseDbfDateFieldRaw(raw);
 		if (fromDbf) return fromDbf;
 	}
 
-	// Excel serial as string
 	if (/^\d+(\.\d+)?$/.test(raw)) {
 		const n = Number(raw);
 		return fromYyyymmddNumber(n) ?? fromExcelSerial(n) ?? '';
 	}
 
-	// DD/MM/YY or DD/MM/YYYY (and -, .) — India-style; day first
 	const dmy = raw.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2}|\d{4})$/);
 	if (dmy) {
 		const day = Number(dmy[1]);
@@ -320,7 +301,6 @@ export function normalizeSowingDateInput(value: unknown): string {
 		let year = Number(dmy[3]);
 		if (dmy[3].length === 2) year = expandTwoDigitYear(year);
 
-		// If first part looks like a month and second like a day (US-style), only swap when unambiguous
 		if (day <= 12 && month > 12) {
 			return toLocalDateString(year, day - 1, month) ?? '';
 		}
@@ -332,7 +312,6 @@ export function normalizeSowingDateInput(value: unknown): string {
 		return toLocalDateString(Number(ymd[1]), Number(ymd[2]) - 1, Number(ymd[3])) ?? '';
 	}
 
-	// Last resort: Date.parse is unreliable for dd/mm/yy — avoid inventing years
 	return '';
 }
 
@@ -380,89 +359,6 @@ export interface WaterSchedule {
 	note?: string;
 }
 
-const MONTH_NAME_TO_INDEX: Record<string, number> = {
-	january: 0,
-	jan: 0,
-	february: 1,
-	feb: 1,
-	march: 2,
-	mar: 2,
-	april: 3,
-	apr: 3,
-	may: 4,
-	june: 5,
-	jun: 5,
-	july: 6,
-	jul: 6,
-	august: 7,
-	aug: 7,
-	september: 8,
-	sep: 8,
-	sept: 8,
-	october: 9,
-	oct: 9,
-	november: 10,
-	nov: 10,
-	december: 11,
-	dec: 11
-};
-
-const CALENDAR_TO_BUDGET_INDEX: Record<number, number> = {
-	0: 7,
-	1: 8,
-	2: 9,
-	3: 10,
-	4: 11,
-	5: 0,
-	6: 1,
-	7: 2,
-	8: 3,
-	9: 4,
-	10: 5,
-	11: 6
-};
-
-function parseMonthDay(value: string): { month: number; day: number } {
-	const cleaned = value.trim().replace(/(\d+)(st|nd|rd|th)/i, '$1');
-	const match = cleaned.match(/^([A-Za-z]+)\s*(\d+)?/);
-	if (!match) return { month: 0, day: 1 };
-
-	const monthKey = match[1].toLowerCase();
-	const month = MONTH_NAME_TO_INDEX[monthKey] ?? 0;
-	const day = match[2] ? Number.parseInt(match[2], 10) : 1;
-	return { month, day };
-}
-
-function budgetIndexToCalendarMonth(index: number): number {
-	return BUDGET_MONTHS[index] === 'January'
-		? 0
-		: BUDGET_MONTHS[index] === 'February'
-			? 1
-			: BUDGET_MONTHS[index] === 'March'
-				? 2
-				: BUDGET_MONTHS[index] === 'April'
-					? 3
-					: BUDGET_MONTHS[index] === 'May'
-						? 4
-						: BUDGET_MONTHS[index] === 'June'
-							? 5
-							: BUDGET_MONTHS[index] === 'July'
-								? 6
-								: BUDGET_MONTHS[index] === 'August'
-									? 7
-									: BUDGET_MONTHS[index] === 'September'
-										? 8
-										: BUDGET_MONTHS[index] === 'October'
-											? 9
-											: BUDGET_MONTHS[index] === 'November'
-												? 10
-												: 11;
-}
-
-function normalizeCropName(name: string): string {
-	return name.trim().toLowerCase().replace(/\)+$/, '');
-}
-
 function parseCsvLine(line: string): string[] {
 	const values: string[] = [];
 	let current = '';
@@ -484,159 +380,138 @@ function parseCsvLine(line: string): string[] {
 	return values;
 }
 
+/**
+ * Parse `total_water_needed.csv` — crop + relative month 1..N depth columns (mm).
+ * Values are converted to m³ per acre on load.
+ */
 export function parseWaterBudgetCsv(csvText: string): WaterBudgetRow[] {
 	const lines = csvText.trim().split(/\r?\n/);
 	if (lines.length < 2) return [];
 
-	const headers = parseCsvLine(lines[0]);
-	const monthStartIndex = headers.indexOf('June');
+	const headers = parseCsvLine(lines[0]).map((h) => h.trim());
+	const monthCols: { index: number; monthNum: number }[] = [];
 
-	return lines.slice(1).filter(Boolean).map((line) => {
-		const cols = parseCsvLine(line);
-		const monthlyWater = {} as Record<BudgetMonth, number>;
-
-		for (let i = 0; i < BUDGET_MONTHS.length; i++) {
-			const value = Number.parseFloat(cols[monthStartIndex + i] ?? '0');
-			monthlyWater[BUDGET_MONTHS[i]] = Number.isFinite(value) ? value : 0;
-		}
-
-		return {
-			crop: cols[0] ?? '',
-			season: cols[1] ?? '',
-			startMonth: cols[2] ?? '',
-			endMonth: cols[3] ?? '',
-			monthlyWater
-		};
-	});
-}
-
-function findBudgetRow(crop: string, sowingDate: Date, budget: WaterBudgetRow[]): WaterBudgetRow | null {
-	if (!crop?.trim()) return null;
-
-	const normalized = normalizeCropName(crop);
-	const matches = budget.filter((row) => normalizeCropName(row.crop) === normalized);
-	if (matches.length === 0) return null;
-	if (matches.length === 1) return matches[0];
-
-	const sowingMonth = sowingDate.getMonth();
-	const sowingDay = sowingDate.getDate();
-
-	let best: WaterBudgetRow | null = null;
-	let bestScore = Number.NEGATIVE_INFINITY;
-
-	for (const row of matches) {
-		const start = parseMonthDay(row.startMonth);
-		const end = parseMonthDay(row.endMonth);
-		let score = 0;
-
-		if (isDateInSeason(sowingMonth, sowingDay, start.month, start.day, end.month, end.day)) {
-			score += 100;
-		}
-
-		score -= Math.abs(sowingMonth - start.month);
-		if (score > bestScore) {
-			bestScore = score;
-			best = row;
-		}
+	for (let i = 0; i < headers.length; i++) {
+		const m = headers[i].match(/^month\s*(\d+)$/i);
+		if (m) monthCols.push({ index: i, monthNum: Number(m[1]) });
 	}
 
-	return best;
+	monthCols.sort((a, b) => a.monthNum - b.monthNum);
+	const maxMonth = monthCols.length > 0 ? monthCols[monthCols.length - 1].monthNum : 0;
+
+	return lines
+		.slice(1)
+		.filter(Boolean)
+		.map((line) => {
+			const cols = parseCsvLine(line);
+			const monthM3PerAcre: Array<number | null> = Array.from({ length: maxMonth }, () => null);
+
+			for (const { index, monthNum } of monthCols) {
+				const raw = cols[index] ?? '';
+				if (raw.trim() === '') continue;
+				const mm = Number.parseFloat(raw);
+				if (Number.isFinite(mm)) monthM3PerAcre[monthNum - 1] = mmPerAcreToM3PerAcre(mm);
+			}
+
+			return {
+				crop: cols[0] ?? '',
+				monthM3PerAcre
+			};
+		})
+		.filter((row) => row.crop.trim() !== '');
 }
 
-function findBudgetRowBySeason(
-	crop: string,
-	season: CropSeason,
-	budget: WaterBudgetRow[]
-): WaterBudgetRow | null {
-	if (!crop?.trim()) return null;
+/** Normalize crop names for matching (handles "Pulses (Arhar)" → pulses, etc.) */
+export function normalizeCropName(name: string): string {
+	return name
+		.trim()
+		.toLowerCase()
+		.replace(/\)+$/, '')
+		.replace(/[()]/g, ' ')
+		.replace(/\s+/g, ' ')
+		.trim();
+}
 
-	const normalized = normalizeCropName(crop);
-	const seasonLower = season.toLowerCase();
+/** Map field crop labels onto budget crop keys in total_water_needed.csv */
+function cropMatchKey(name: string): string {
+	const n = normalizeCropName(name);
+	if (!n) return '';
+
+	if (n.includes('paddy') || n.includes('rice')) return 'paddy';
+	if (n.includes('cotton')) return 'cotton';
+	if (n.includes('groundnut') || n.includes('peanut')) return 'groundnut';
+	if (n.includes('pulse') || n.includes('arhar') || n.includes('gram') || n.includes('tur'))
+		return 'pulses';
+	if (n.includes('millet') || n.includes('sorghum') || n.includes('bajra') || n.includes('jowar'))
+		return 'millets';
+	if (n.includes('sunflower')) return 'sunflower';
+	if (n.includes('seasame') || n.includes('sesame') || n.includes('til')) return 'seasame';
+	if (n.includes('chilli') || n.includes('chili') || n.includes('pepper')) return 'chilli';
+
+	return n;
+}
+
+export function findBudgetRow(crop: string, budget: WaterBudgetRow[]): WaterBudgetRow | null {
+	if (!crop?.trim()) return null;
+	const key = cropMatchKey(crop);
+	if (!key) return null;
 
 	return (
-		budget.find(
-			(row) =>
-				normalizeCropName(row.crop) === normalized && row.season.toLowerCase() === seasonLower
-		) ?? null
+		budget.find((row) => cropMatchKey(row.crop) === key) ??
+		budget.find((row) => normalizeCropName(row.crop) === normalizeCropName(crop)) ??
+		null
 	);
 }
 
-function seasonReferenceYear(sowingDate: Date, seasonStartMonth: number): number {
-	const sowingYear = sowingDate.getFullYear();
-	const sowingMonth = sowingDate.getMonth();
-
-	// Rabi seasons start in late year; sowing in Jan–Mar belongs to season that started previous calendar year.
-	if (sowingMonth < seasonStartMonth && seasonStartMonth >= 10 && sowingMonth < 4) {
-		return sowingYear - 1;
-	}
-
-	return sowingYear;
+/** Infer Kharif/Rabi from sowing month for export column prefixes. */
+export function inferSeasonFromSowingDate(sowingDate: Date): CropSeason {
+	const m = sowingDate.getMonth(); // 0–11
+	// Apr (3) – Sep (8) → Kharif; Oct – Mar → Rabi
+	return m >= 3 && m <= 8 ? 'Kharif' : 'Rabi';
 }
 
-function resolveEndBudgetIndex(budgetRow: WaterBudgetRow): number {
-	const endParsed = parseMonthDay(budgetRow.endMonth);
-	return CALENDAR_TO_BUDGET_INDEX[endParsed.month];
-}
-
-function buildMonthlyNeedsFromBudgetRow(
-	budgetRow: WaterBudgetRow,
-	startBudgetIndex: number,
-	endBudgetIndex: number,
-	plotAcres: number,
-	referenceYear: number
+function buildMonthlyNeedsFromSowing(
+	monthM3PerAcre: Array<number | null>,
+	sowingDate: Date,
+	plotAcres: number
 ): MonthlyWaterNeed[] {
 	const monthlyNeeds: MonthlyWaterNeed[] = [];
-	let currentIndex = startBudgetIndex;
-	let year = referenceYear;
-	let previousCalendarMonth = budgetIndexToCalendarMonth(startBudgetIndex);
-	let steps = 0;
+	let year = sowingDate.getFullYear();
+	let month = sowingDate.getMonth();
 
-	while (steps < 12) {
-		const budgetMonth = BUDGET_MONTHS[currentIndex];
-		const calendarMonth = budgetIndexToCalendarMonth(currentIndex);
-
-		if (steps > 0 && calendarMonth < previousCalendarMonth) {
-			year += 1;
+	for (let i = 0; i < monthM3PerAcre.length; i++) {
+		const m3PerAcre = monthM3PerAcre[i];
+		if (m3PerAcre === null) {
+			month += 1;
+			if (month > 11) {
+				month = 0;
+				year += 1;
+			}
+			continue;
 		}
-		previousCalendarMonth = calendarMonth;
 
-		const mmPerAcre = budgetRow.monthlyWater[budgetMonth];
+		const waterM3 = m3PerAcre * plotAcres;
+		const waterMmPerAcre = (m3PerAcre / ACRE_M2) * 1000;
+
 		monthlyNeeds.push({
-			month: budgetMonth,
-			calendarMonth,
+			month: BUDGET_MONTHS[month],
+			relativeMonth: i + 1,
+			calendarMonth: month,
 			calendarYear: year,
-			waterMmPerAcre: mmPerAcre,
-			waterMm: mmPerAcre * plotAcres,
-			waterM3PerAcre: mmPerAcreToM3PerAcre(mmPerAcre),
-			waterM3: mmDepthToM3(mmPerAcre, plotAcres)
+			waterMmPerAcre,
+			waterMm: waterMmPerAcre * plotAcres,
+			waterM3PerAcre: m3PerAcre,
+			waterM3
 		});
 
-		if (currentIndex === endBudgetIndex) break;
-
-		currentIndex = (currentIndex + 1) % 12;
-		steps += 1;
+		month += 1;
+		if (month > 11) {
+			month = 0;
+			year += 1;
+		}
 	}
 
 	return monthlyNeeds;
-}
-
-function isDateInSeason(
-	month: number,
-	day: number,
-	startMonth: number,
-	startDay: number,
-	endMonth: number,
-	endDay: number
-): boolean {
-	const dateValue = month * 100 + day;
-	const startValue = startMonth * 100 + startDay;
-	const endValue = endMonth * 100 + endDay;
-
-	if (startValue <= endValue) {
-		return dateValue >= startValue && dateValue <= endValue;
-	}
-
-	return dateValue >= startValue || dateValue <= endValue;
 }
 
 function sumVisibleWaterTotals(
@@ -670,6 +545,10 @@ function emptyWaterScheduleTotals(): Pick<
 	};
 }
 
+/**
+ * Build a water schedule starting at the sowing date.
+ * Month 1 of the budget aligns with the sowing calendar month.
+ */
 export function calculateWaterSchedule(
 	crop: string,
 	sowingDateStr: string,
@@ -692,7 +571,7 @@ export function calculateWaterSchedule(
 		};
 	}
 
-	const budgetRow = findBudgetRow(crop, sowingDate, budget);
+	const budgetRow = findBudgetRow(crop, budget);
 	if (!budgetRow) {
 		return {
 			crop,
@@ -706,22 +585,11 @@ export function calculateWaterSchedule(
 		};
 	}
 
-	const seasonStartParsed = parseMonthDay(budgetRow.startMonth);
-	const seasonStartBudgetIndex = CALENDAR_TO_BUDGET_INDEX[seasonStartParsed.month];
-	const endBudgetIndex = resolveEndBudgetIndex(budgetRow);
-	const referenceYear = seasonReferenceYear(sowingDate, seasonStartParsed.month);
-
-	const monthlyNeeds = buildMonthlyNeedsFromBudgetRow(
-		budgetRow,
-		seasonStartBudgetIndex,
-		endBudgetIndex,
-		plotAcres,
-		referenceYear
-	);
-
+	const season = inferSeasonFromSowingDate(sowingDate);
+	const monthlyNeeds = buildMonthlyNeedsFromSowing(budgetRow.monthM3PerAcre, sowingDate, plotAcres);
 	const visibleNeeds = getExportableMonthNeeds({
 		crop,
-		season: budgetRow.season,
+		season,
 		sowingDate: normalizedDate,
 		acres: plotAcres,
 		monthlyNeeds,
@@ -732,7 +600,7 @@ export function calculateWaterSchedule(
 
 	return {
 		crop,
-		season: budgetRow.season,
+		season,
 		sowingDate: normalizedDate,
 		acres: plotAcres,
 		monthlyNeeds,
@@ -741,6 +609,10 @@ export function calculateWaterSchedule(
 	};
 }
 
+/**
+ * When no per-plot sowing date exists, use a default start date
+ * (or a season → default sowing date mapping).
+ */
 export function calculateWaterScheduleBySeason(
 	crop: string,
 	season: CropSeason,
@@ -748,56 +620,35 @@ export function calculateWaterScheduleBySeason(
 	acres = 1,
 	referenceYear = new Date().getFullYear()
 ): WaterSchedule {
-	const plotAcres = Number.isFinite(acres) && acres > 0 ? acres : 1;
-	const budgetRow = findBudgetRowBySeason(crop, season, budget);
+	// Default sowing anchors when only season is known
+	const sowingDateStr =
+		season === 'Rabi'
+			? `${referenceYear}-11-15`
+			: `${referenceYear}-06-15`;
 
-	if (!budgetRow) {
+	const schedule = calculateWaterSchedule(crop, sowingDateStr, budget, acres);
+	if (!schedule.matchedBudget) {
 		return {
-			crop,
+			...schedule,
 			season,
-			sowingDate: '',
-			acres: plotAcres,
-			monthlyNeeds: [],
-			...emptyWaterScheduleTotals(),
-			matchedBudget: false,
-			note: `No ${season} water budget found for crop "${crop}"`
+			note: schedule.note ?? `No water budget found for crop "${crop}"`
 		};
 	}
+	return { ...schedule, season };
+}
 
-	const startParsed = parseMonthDay(budgetRow.startMonth);
-	const endParsed = parseMonthDay(budgetRow.endMonth);
-	const startBudgetIndex = CALENDAR_TO_BUDGET_INDEX[startParsed.month];
-	const endBudgetIndex = resolveEndBudgetIndex(budgetRow);
-	const sowingDateStr = `${referenceYear}-${String(startParsed.month + 1).padStart(2, '0')}-${String(startParsed.day).padStart(2, '0')}`;
+/** List of crops available in the budget CSV (for the calculator palette). */
+export function listBudgetCrops(budget: WaterBudgetRow[]): string[] {
+	return budget.map((r) => r.crop);
+}
 
-	const monthlyNeeds = buildMonthlyNeedsFromBudgetRow(
-		budgetRow,
-		startBudgetIndex,
-		endBudgetIndex,
-		plotAcres,
-		referenceYear
-	);
+export function cropTotalM3PerAcre(row: WaterBudgetRow): number {
+	return row.monthM3PerAcre.reduce<number>((s, v) => s + (v ?? 0), 0);
+}
 
-	const visibleNeeds = getExportableMonthNeeds({
-		crop,
-		season: budgetRow.season,
-		sowingDate: sowingDateStr,
-		acres: plotAcres,
-		monthlyNeeds,
-		...emptyWaterScheduleTotals(),
-		matchedBudget: true
-	});
-	const totals = sumVisibleWaterTotals(visibleNeeds, plotAcres);
-
-	return {
-		crop,
-		season: budgetRow.season,
-		sowingDate: sowingDateStr,
-		acres: plotAcres,
-		monthlyNeeds,
-		...totals,
-		matchedBudget: true
-	};
+/** @deprecated use cropTotalM3PerAcre — kept for callers during rename */
+export function cropTotalMm(row: WaterBudgetRow): number {
+	return (cropTotalM3PerAcre(row) / ACRE_M2) * 1000;
 }
 
 export function formatCalendarMonth(monthIndex: number, year: number): string {

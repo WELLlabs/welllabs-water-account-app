@@ -58,10 +58,12 @@
 	let exportMenuOpen = $state(false);
 	let exportMenuRef = $state<HTMLDivElement | null>(null);
 
-	/** Dashboard: individual plot / group aggregate / farm-wide */
+	/** Dashboard: individual plot / group / sub-group / farm-wide */
 	let viewMode = $state<ViewMode>('plot');
 	let groupByColumn = $state('');
+	let subGroupByColumn = $state('');
 	let selectedGroup = $state<string | null>(null);
+	let selectedSubGroup = $state<string | null>(null);
 
 	const useSeasonFallback = $derived(!sowingDateColumn);
 	const useDefaultAcres = $derived(!acresColumn);
@@ -72,9 +74,9 @@
 	const labelClass = 'grid gap-1.5 text-sm text-slate-700';
 
 	async function loadBudgetCsv(): Promise<string> {
-		const budgetResponse = await fetch('/farm_water_budget.csv');
+		const budgetResponse = await fetch('/total_water_needed.csv');
 		if (!budgetResponse.ok) {
-			throw new Error('Could not load farm_water_budget.csv');
+			throw new Error('Could not load total_water_needed.csv');
 		}
 		return budgetResponse.text();
 	}
@@ -82,10 +84,12 @@
 	function resetForNewUpload(displayName: string) {
 		selectedFeature = null;
 		selectedGroup = null;
+		selectedSubGroup = null;
 		geojson = null;
 		featureCount = 0;
 		tableName = '';
 		groupByColumn = '';
+		subGroupByColumn = '';
 		viewMode = 'plot';
 		fileName = displayName;
 		showColumnConfig = false;
@@ -114,6 +118,7 @@
 		error = null;
 		selectedFeature = null;
 		selectedGroup = null;
+		selectedSubGroup = null;
 
 		try {
 			const budgetCsv = await loadBudgetCsv();
@@ -138,12 +143,18 @@
 			showColumnConfig = false;
 			const cols = getGroupableColumns(processed.features);
 			groupByColumn = cols.includes('crop') ? 'crop' : cols[0] ?? '';
+			// Prefer crop as Then-by when Group by is something else (e.g. lateral)
+			subGroupByColumn =
+				groupByColumn && groupByColumn !== 'crop' && cols.includes('crop')
+					? 'crop'
+					: cols.find((c) => c !== groupByColumn) ?? '';
 			viewMode = 'overall';
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Failed to process data.';
 			geojson = null;
 			featureCount = 0;
 			groupByColumn = '';
+			subGroupByColumn = '';
 		} finally {
 			loading = false;
 		}
@@ -568,6 +579,7 @@
 				{#each [
 					{ id: 'plot' as ViewMode, label: 'Individual plots' },
 					{ id: 'group' as ViewMode, label: 'Groups' },
+					{ id: 'subgroup' as ViewMode, label: 'Sub-groups' },
 					{ id: 'overall' as ViewMode, label: 'Overall' }
 				] as tab}
 					<button
@@ -583,10 +595,16 @@
 							if (tab.id === 'overall') {
 								selectedFeature = null;
 								selectedGroup = null;
+								selectedSubGroup = null;
 							} else if (tab.id === 'group') {
 								selectedFeature = null;
+								selectedSubGroup = null;
+							} else if (tab.id === 'subgroup') {
+								selectedFeature = null;
+								selectedSubGroup = null;
 							} else if (tab.id === 'plot') {
 								selectedGroup = null;
+								selectedSubGroup = null;
 							}
 						}}
 					>
@@ -595,22 +613,47 @@
 				{/each}
 			</div>
 
-			<label class="flex items-center gap-2 text-sm text-slate-700">
-				<span class="font-semibold">Group by</span>
-				<select
-					class="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm text-slate-900"
-					value={groupByColumn}
-					onchange={(e) => {
-						groupByColumn = (e.target as HTMLSelectElement).value;
-						selectedGroup = null;
-					}}
-				>
-					<option value="">None</option>
-					{#each groupableColumns as col}
-						<option value={col}>{col}</option>
-					{/each}
-				</select>
-			</label>
+			<div class="flex flex-wrap items-center gap-3">
+				<label class="flex items-center gap-2 text-sm text-slate-700">
+					<span class="font-semibold">Group by</span>
+					<select
+						class="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm text-slate-900"
+						value={groupByColumn}
+						onchange={(e) => {
+							groupByColumn = (e.target as HTMLSelectElement).value;
+							selectedGroup = null;
+							selectedSubGroup = null;
+							if (subGroupByColumn === groupByColumn) {
+								subGroupByColumn =
+									groupableColumns.find((c) => c !== groupByColumn) ?? '';
+							}
+						}}
+					>
+						<option value="">None</option>
+						{#each groupableColumns as col}
+							<option value={col}>{col}</option>
+						{/each}
+					</select>
+				</label>
+
+				<label class="flex items-center gap-2 text-sm text-slate-700">
+					<span class="font-semibold">Then by</span>
+					<select
+						class="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm text-slate-900 disabled:opacity-50"
+						value={subGroupByColumn}
+						disabled={!groupByColumn}
+						onchange={(e) => {
+							subGroupByColumn = (e.target as HTMLSelectElement).value;
+							selectedSubGroup = null;
+						}}
+					>
+						<option value="">None</option>
+						{#each groupableColumns.filter((c) => c !== groupByColumn) as col}
+							<option value={col}>{col}</option>
+						{/each}
+					</select>
+				</label>
+			</div>
 		</div>
 
 		<FarmMap
@@ -618,19 +661,31 @@
 			{selectedFeature}
 			{viewMode}
 			{groupByColumn}
+			{subGroupByColumn}
 			{selectedGroup}
+			{selectedSubGroup}
 			onFeatureSelect={(feature) => {
 				selectedFeature = feature;
 				if (feature && viewMode === 'overall') {
-					// Peeking a plot from overall keeps overall mode; no mode switch
+					// Peeking a plot from overall keeps overall mode
 				} else if (feature) {
 					viewMode = 'plot';
 				}
 			}}
 			onGroupSelect={(key) => {
 				selectedGroup = key;
+				selectedSubGroup = null;
 				if (key) {
-					viewMode = 'group';
+					if (viewMode === 'plot' || viewMode === 'overall') {
+						viewMode = 'group';
+					}
+					selectedFeature = null;
+				}
+			}}
+			onSubGroupSelect={(key) => {
+				selectedSubGroup = key;
+				if (key) {
+					viewMode = 'subgroup';
 					selectedFeature = null;
 				}
 			}}
