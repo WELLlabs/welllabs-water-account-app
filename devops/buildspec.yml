@@ -2,9 +2,8 @@ version: 0.2
 
 # ============================================================
 #  WELL LABS — AWS CodeBuild Buildspec
-#  App     : SvelteKit SPA (ssr = false → adapter-static)
-#  Output  : Pure static files in build/
-#  No backend, no env vars, no secrets required at build time.
+#  App     : SvelteKit SPA (ssr = false → adapter-static) + FastAPI
+#  Output  : Static files in build/ + api/ Python package
 # ============================================================
 
 phases:
@@ -26,14 +25,21 @@ phases:
   post_build:
     commands:
       - echo "=== [POST-BUILD] Assembling deployment artifact ==="
-      # Only ship what CodeDeploy needs:
+      # Ship what CodeDeploy needs:
       #   build/      → static site (index.html, _app/, assets)
-      #   devops/     → nginx config + lifecycle scripts
+      #   api/        → FastAPI QGZ service (no .venv)
+      #   devops/     → nginx + systemd + lifecycle scripts
       #   appspec.yml → CodeDeploy entry point
       - mkdir -p deploy_artifact
       - cp -r build     deploy_artifact/
       - cp -r devops    deploy_artifact/
       - cp appspec.yml  deploy_artifact/
+      # Copy API source only (exclude local venv / caches if present)
+      - mkdir -p deploy_artifact/api
+      - |
+        tar -C api -cf - \
+          --exclude='.venv' --exclude='__pycache__' --exclude='*.pyc' . \
+          | tar -C deploy_artifact/api -xf -
       # Make all shell scripts executable inside the artifact
       - chmod +x deploy_artifact/devops/scripts/*.sh || true
       - echo "Artifact contents:"

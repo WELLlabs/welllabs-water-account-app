@@ -1,0 +1,22 @@
+[Unit]
+Description=Well Labs Farm Water Accounting QGZ API
+Documentation=https://github.com/welllabs
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/welllabs/current
+Environment=PATH=/opt/welllabs/api-venv/bin:/usr/local/bin:/usr/bin
+ExecStart=/opt/welllabs/api-venv/bin/uvicorn api.main:app --host 127.0.0.1 --port 8001 --workers 1
+Restart=on-failure
+RestartSec=5
+# Large GeoJSON configs + long QGZ builds
+TimeoutStartSec=60
+TimeoutStopSec=30
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target

@@ -1,5 +1,5 @@
 #!/bin/bash
-# CodeDeploy Hook: AfterInstall — Well Labs Water Accounting (SPA)
+# CodeDeploy Hook: AfterInstall — Well Labs Water Accounting (SPA + FastAPI)
 set -euo pipefail
 exec >> /var/log/welllabs-deploy.log 2>&1
 
@@ -12,8 +12,10 @@ APP_BASE="/opt/welllabs"
 RELEASES_DIR="${APP_BASE}/releases"
 PACKAGE_DIR="${APP_BASE}/package"
 CURRENT_LINK="${APP_BASE}/current"
+API_VENV="${APP_BASE}/api-venv"
 # Production has historically used conf.d — keep updating that path only
 NGINX_CONF="/etc/nginx/conf.d/welllabs.conf"
+SYSTEMD_UNIT="/etc/systemd/system/welllabs-api.service"
 KEEP_RELEASES=3
 
 # ── 1. Read & validate release name ─────────────────────────
@@ -27,10 +29,10 @@ if [[ ! "${RELEASE_NAME}" =~ ^release_[0-9]{8}_[0-9]{6}$ ]]; then
 fi
 
 RELEASE_DIR="${RELEASES_DIR}/${RELEASE_NAME}"
-echo "[1/5] Deploying to: ${RELEASE_DIR}"
+echo "[1/7] Deploying to: ${RELEASE_DIR}"
 
 # ── 2. Copy artifact into release directory ──────────────────
-echo "[2/5] Copying artifact into release directory..."
+echo "[2/7] Copying artifact into release directory..."
 cp -a "${PACKAGE_DIR}/." "${RELEASE_DIR}/"
 
 # Verify expected build output exists
@@ -40,8 +42,17 @@ if [ ! -f "${RELEASE_DIR}/build/index.html" ]; then
 fi
 echo "  → build/index.html confirmed."
 
+if [ ! -f "${RELEASE_DIR}/api/main.py" ]; then
+  echo "ERROR: api/main.py not found. Artifact is missing FastAPI sources."
+  exit 1
+fi
+echo "  → api/main.py confirmed."
+
+# Ensure api is importable as a package
+touch "${RELEASE_DIR}/api/__init__.py"
+
 # ── 3. Install / update Nginx configuration (conf.d — legacy path) ─
-echo "[3/5] Installing Nginx configuration to ${NGINX_CONF}..."
+echo "[3/7] Installing Nginx configuration to ${NGINX_CONF}..."
 
 # Drop any sites-* copy from a prior failed deploy to avoid duplicate zones
 rm -f /etc/nginx/sites-enabled/welllabs /etc/nginx/sites-available/welllabs
@@ -66,18 +77,42 @@ if ! nginx -t; then
 fi
 
 systemctl reload nginx
-echo "  → Nginx config installed and reloaded (client_max_body_size 64m, /api → :8001)."
+echo "  → Nginx config installed and reloaded (client_max_body_size 512m, /api → :8001)."
 
-# ── 4. Atomic symlink swap ───────────────────────────────────
-echo "[4/5] Swapping symlink: current → ${RELEASE_NAME}"
+# ── 4. Python runtime + shared venv for FastAPI ──────────────
+echo "[4/7] Ensuring Python venv and API dependencies..."
+
+export DEBIAN_FRONTEND=noninteractive
+apt-get update -qq
+apt-get install -y -qq python3 python3-venv python3-pip
+
+if [ ! -x "${API_VENV}/bin/python" ]; then
+  echo "  → Creating venv at ${API_VENV}"
+  python3 -m venv "${API_VENV}"
+fi
+
+"${API_VENV}/bin/pip" install --upgrade pip -q
+"${API_VENV}/bin/pip" install -r "${RELEASE_DIR}/api/requirements.txt" -q
+chown -R ubuntu:ubuntu "${API_VENV}"
+echo "  → API dependencies installed."
+
+# ── 5. Install systemd unit for FastAPI ──────────────────────
+echo "[5/7] Installing systemd unit welllabs-api.service..."
+cp "${RELEASE_DIR}/devops/systemd/welllabs-api.service" "${SYSTEMD_UNIT}"
+systemctl daemon-reload
+systemctl enable welllabs-api.service
+echo "  → systemd unit installed and enabled."
+
+# ── 6. Atomic symlink swap ───────────────────────────────────
+echo "[6/7] Swapping symlink: current → ${RELEASE_NAME}"
 ln -sfn "${RELEASE_DIR}" "${CURRENT_LINK}"
 
 chown -R ubuntu:ubuntu "${RELEASES_DIR}" 2>/dev/null || true
 # Use the real path (not the symlink) for chmod to avoid following to wrong dir
 chmod -R 755 "${RELEASE_DIR}/build"
 
-# ── 5. Prune old releases ────────────────────────────────────
-echo "[5/5] Pruning old releases (keeping last ${KEEP_RELEASES})..."
+# ── 7. Prune old releases ────────────────────────────────────
+echo "[7/7] Pruning old releases (keeping last ${KEEP_RELEASES})..."
 RELEASE_COUNT=$(ls -1 "${RELEASES_DIR}" | wc -l)
 if [ "${RELEASE_COUNT}" -gt "${KEEP_RELEASES}" ]; then
   # Collect names into an array first — avoids pipe subshell losing set -e

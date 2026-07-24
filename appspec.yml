@@ -3,9 +3,9 @@ os: linux
 
 # ============================================================
 #  WELL LABS — AWS CodeDeploy AppSpec
-#  App Type  : SvelteKit SPA (static — ssr = false)
-#  Web Server : Nginx (serves build/ directly from disk)
-#  Strategy  : Releases directory + atomic symlink swap
+#  App Type   : SvelteKit SPA (static — ssr = false) + FastAPI
+#  Web Server : Nginx (static build/ + reverse proxy /api → :8001)
+#  Strategy   : Releases directory + atomic symlink swap
 # ============================================================
 
 files:
@@ -28,20 +28,20 @@ hooks:
       timeout: 180
       runas: root
 
-  # Copy build → release dir, update Nginx config, atomic symlink swap
+  # Copy build+api → release, nginx + systemd unit, venv, symlink swap
   AfterInstall:
     - location: devops/scripts/after_install.sh
-      timeout: 120
+      timeout: 900
       runas: root
 
-  # Graceful nginx reload (no Node.js to restart — pure static)
+  # Start/restart FastAPI + reload nginx
   ApplicationStart:
     - location: devops/scripts/application_start.sh
-      timeout: 60
+      timeout: 120
       runas: root
 
   # Health checks — fail → CodeDeploy auto-rollback
   ValidateService:
     - location: devops/scripts/validate_service.sh
-      timeout: 60
+      timeout: 90
       runas: root

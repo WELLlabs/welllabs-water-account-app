@@ -1,5 +1,5 @@
 #!/bin/bash
-# CodeDeploy Hook: ValidateService — Well Labs Water Accounting (SPA)
+# CodeDeploy Hook: ValidateService — Well Labs Water Accounting (SPA + FastAPI)
 set -euo pipefail
 exec >> /var/log/welllabs-deploy.log 2>&1
 
@@ -8,11 +8,11 @@ echo "========================================"
 echo "  [ValidateService] $(date '+%Y-%m-%d %H:%M:%S')"
 echo "========================================"
 
-MAX_RETRIES=6
+MAX_RETRIES=8
 RETRY_INTERVAL=5
 
 # ── 1. Nginx service health ──────────────────────────────────
-echo "[1/3] Checking Nginx service..."
+echo "[1/4] Checking Nginx service..."
 if ! systemctl is-active --quiet nginx; then
   echo "✗ FAIL: Nginx is NOT active."
   systemctl status nginx --no-pager || true
@@ -20,28 +20,73 @@ if ! systemctl is-active --quiet nginx; then
 fi
 echo "  → Nginx is active."
 
-# ── 2. HTTP response from Nginx ──────────────────────────────
-# Port 80 serves the app directly — accept 2xx and 3xx as healthy.
-echo "[2/3] Polling http://127.0.0.1/ ..."
-ATTEMPT=0
-until HTTP_CODE=$(curl --silent -o /dev/null -w "%{http_code}" \
-      --max-time 5 http://127.0.0.1/ 2>/dev/null); do
-  ATTEMPT=$((ATTEMPT + 1))
-  if [ "${ATTEMPT}" -ge "${MAX_RETRIES}" ]; then
-    echo "✗ FAIL: curl error after $((MAX_RETRIES * RETRY_INTERVAL))s."
-    exit 1
-  fi
-  sleep "${RETRY_INTERVAL}"
-done
-
-if [[ ! "${HTTP_CODE}" =~ ^(200|301|302)$ ]]; then
-  echo "✗ FAIL: Nginx returned HTTP ${HTTP_CODE}."
+# ── 2. FastAPI systemd + direct health ───────────────────────
+echo "[2/4] Checking welllabs-api service..."
+if ! systemctl is-active --quiet welllabs-api; then
+  echo "✗ FAIL: welllabs-api is NOT active."
+  systemctl status welllabs-api --no-pager || true
+  journalctl -u welllabs-api -n 40 --no-pager || true
   exit 1
 fi
-echo "  → HTTP ${HTTP_CODE} OK."
+echo "  → welllabs-api is active."
 
-# ── 3. Symlink and build integrity ───────────────────────────
-echo "[3/3] Checking symlink and build files..."
+ATTEMPT=0
+HTTP_API="000"
+while [ "${HTTP_API}" != "200" ]; do
+  ATTEMPT=$((ATTEMPT + 1))
+  if [ "${ATTEMPT}" -gt "${MAX_RETRIES}" ]; then
+    echo "✗ FAIL: uvicorn /api/health not ready after $((MAX_RETRIES * RETRY_INTERVAL))s (last HTTP ${HTTP_API})."
+    journalctl -u welllabs-api -n 40 --no-pager || true
+    exit 1
+  fi
+  HTTP_API=$(curl --silent -o /dev/null -w "%{http_code}" \
+        --max-time 5 http://127.0.0.1:8001/api/health 2>/dev/null || echo "000")
+  if [ "${HTTP_API}" != "200" ]; then
+    echo "  → attempt ${ATTEMPT}/${MAX_RETRIES}: HTTP ${HTTP_API}, retrying..."
+    sleep "${RETRY_INTERVAL}"
+  fi
+done
+echo "  → uvicorn /api/health HTTP ${HTTP_API} OK."
+
+# ── 3. HTTP response from Nginx (SPA + proxied API) ──────────
+# Port 80 serves the app directly — accept 2xx and 3xx as healthy.
+echo "[3/4] Polling http://127.0.0.1/ and /api/health via Nginx..."
+ATTEMPT=0
+HTTP_CODE="000"
+while [[ ! "${HTTP_CODE}" =~ ^(200|301|302)$ ]]; do
+  ATTEMPT=$((ATTEMPT + 1))
+  if [ "${ATTEMPT}" -gt "${MAX_RETRIES}" ]; then
+    echo "✗ FAIL: Nginx SPA not ready after $((MAX_RETRIES * RETRY_INTERVAL))s (last HTTP ${HTTP_CODE})."
+    exit 1
+  fi
+  HTTP_CODE=$(curl --silent -o /dev/null -w "%{http_code}" \
+        --max-time 5 http://127.0.0.1/ 2>/dev/null || echo "000")
+  if [[ ! "${HTTP_CODE}" =~ ^(200|301|302)$ ]]; then
+    echo "  → attempt ${ATTEMPT}/${MAX_RETRIES}: HTTP ${HTTP_CODE}, retrying..."
+    sleep "${RETRY_INTERVAL}"
+  fi
+done
+echo "  → SPA HTTP ${HTTP_CODE} OK."
+
+ATTEMPT=0
+HTTP_PROXY="000"
+while [ "${HTTP_PROXY}" != "200" ]; do
+  ATTEMPT=$((ATTEMPT + 1))
+  if [ "${ATTEMPT}" -gt "${MAX_RETRIES}" ]; then
+    echo "✗ FAIL: Nginx /api/health not ready after $((MAX_RETRIES * RETRY_INTERVAL))s (last HTTP ${HTTP_PROXY})."
+    exit 1
+  fi
+  HTTP_PROXY=$(curl --silent -o /dev/null -w "%{http_code}" \
+        --max-time 5 http://127.0.0.1/api/health 2>/dev/null || echo "000")
+  if [ "${HTTP_PROXY}" != "200" ]; then
+    echo "  → attempt ${ATTEMPT}/${MAX_RETRIES}: HTTP ${HTTP_PROXY}, retrying..."
+    sleep "${RETRY_INTERVAL}"
+  fi
+done
+echo "  → Nginx /api/health HTTP ${HTTP_PROXY} OK."
+
+# ── 4. Symlink and build integrity ───────────────────────────
+echo "[4/4] Checking symlink and build files..."
 
 # Read and validate release name (strict format, from secure location)
 EXPECTED_RELEASE=$(cat /run/welllabs_release_name 2>/dev/null || echo "")

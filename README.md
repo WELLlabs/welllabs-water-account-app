@@ -89,18 +89,21 @@ Supported budget crops include Paddy, Cotton, Groundnut, Pulses, Millets, Sunflo
 
 ## Production notes
 
-The frontend build does not embed FastAPI. Production deployments must run the Python API separately and route `/api` to it. Keep QFieldCloud tokens out of source control and environment files out of Git.
+CodeDeploy ships the static `build/` plus the `api/` package. After install it:
 
-Nginx must allow large request bodies for form export (GeoJSON plot boundaries). The shipped config at `devops/nginx/welllabs.conf` sets `client_max_body_size 64m` and proxies `/api/` to `127.0.0.1:8001`. CodeDeploy installs it to **`/etc/nginx/conf.d/welllabs.conf`** (the historical path). A pre-API copy is kept as `devops/nginx/welllabs.conf.legacy`. Without the larger body size, uploads fail with **413 Request Entity Too Large**.
+1. Installs Nginx config (`client_max_body_size 512m`, `/api/` → `127.0.0.1:8001`) to **`/etc/nginx/conf.d/welllabs.conf`**.
+2. Creates a shared venv at `/opt/welllabs/api-venv` and installs `api/requirements.txt`.
+3. Installs the systemd unit `welllabs-api.service` (uvicorn on port 8001).
+4. Restarts `welllabs-api` and reloads Nginx; ValidateService checks `/api/health` directly and via Nginx.
 
-To apply immediately on an existing server (before the next deploy):
+A pre-API Nginx snapshot is kept as `devops/nginx/welllabs.conf.legacy`. Without the larger body size, uploads fail with **413 Request Entity Too Large**. Keep QFieldCloud tokens out of source control.
+
+Useful on-server checks after deploy:
 
 ```bash
-sudo cp /etc/nginx/conf.d/welllabs.conf /etc/nginx/conf.d/welllabs.conf.bak
-# then update /etc/nginx/conf.d/welllabs.conf with client_max_body_size 64m
-# and a location /api/ proxy to 127.0.0.1:8001
-
-sudo nginx -t && sudo systemctl reload nginx
+systemctl status welllabs-api nginx
+curl -s http://127.0.0.1:8001/api/health
+curl -s http://127.0.0.1/api/health
+sudo grep client_max_body_size /etc/nginx/conf.d/welllabs.conf
+sudo tail -50 /var/log/welllabs-deploy.log
 ```
-
-Also remove any leftover `/etc/nginx/sites-enabled/welllabs` from a failed deploy so zones are not duplicated.

@@ -14,9 +14,9 @@ from .qgz_builder import build_qgz
 
 # Allow large form fields (GeoJSON config). Offline basemaps are NOT uploaded —
 # the browser stitches them into the QGZ after this API returns.
-MultiPartParser.max_part_size = 64 * 1024 * 1024  # 64 MB
+MultiPartParser.max_part_size = 512 * 1024 * 1024  # 512 MB
 if hasattr(MultiPartParser, "spool_max_size"):
-    MultiPartParser.spool_max_size = 64 * 1024 * 1024
+    MultiPartParser.spool_max_size = 512 * 1024 * 1024
 
 app = FastAPI(title="Farm Water Accounting QGZ API", version="1.0.0")
 
@@ -42,7 +42,7 @@ async def generate_qgz(request: Request):
     Accepts multipart form with a `config` JSON field. Offline basemap files
     should be merged client-side — do not upload MBTiles here.
     """
-    form = await request.form(max_part_size=64 * 1024 * 1024)
+    form = await request.form(max_part_size=512 * 1024 * 1024)
     config_raw = form.get("config")
     if config_raw is None:
         raise HTTPException(status_code=400, detail="Missing form field: config")
