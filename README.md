@@ -66,11 +66,12 @@ npm run build     # production frontend build
 
 ## QGZ export flow
 
-1. The browser sends project configuration and GeoJSON boundaries to `/api/generate-qgz`.
-2. FastAPI writes `data.gpkg` with farm plots and lookup layers.
-3. FastAPI builds the QGIS project XML and returns a base QGZ.
-4. The browser adds selected MBTiles or GeoTIFF files without uploading those large files to the API.
-5. The completed QGZ can be downloaded or pushed to QFieldCloud.
+1. The browser compacts plot GeoJSON (kept columns only, rounded coordinates), gzip-compresses it, and posts to `/api/generate-qgz`.
+2. If the payload is still large (or a single POST is rejected with 413), it uploads in ≤256 KiB chunks via `/api/generate-qgz/init|chunk|complete`.
+3. FastAPI writes `data.gpkg` with farm plots and lookup layers.
+4. FastAPI builds the QGIS project XML and returns a base QGZ.
+5. The browser adds selected MBTiles or GeoTIFF files without uploading those large files to the API.
+6. The completed QGZ can be downloaded or pushed to QFieldCloud.
 
 Internet basemaps require connectivity in QGIS/QField. MBTiles and GeoTIFF files are bundled for offline use.
 
@@ -91,10 +92,12 @@ Supported budget crops include Paddy, Cotton, Groundnut, Pulses, Millets, Sunflo
 
 CodeDeploy ships the static `build/` plus the `api/` package. After install it:
 
-1. Installs Nginx config (`client_max_body_size 512m`, `/api/` → `127.0.0.1:8001`) to **`/etc/nginx/conf.d/welllabs.conf`**.
+1. Installs Nginx config (`client_max_body_size 512m`, `/api/` → `127.0.0.1:8001`) to **`/etc/nginx/conf.d/welllabs.conf`**, plus http-level **`/etc/nginx/conf.d/00-upload-limits.conf`**.
 2. Creates a shared venv at `/opt/welllabs/api-venv` and installs `api/requirements.txt`.
 3. Installs the systemd unit `welllabs-api.service` (uvicorn on port 8001).
 4. Restarts `welllabs-api` and reloads Nginx; ValidateService checks `/api/health` directly and via Nginx.
+
+Form export no longer depends on a raised nginx body limit alone: the browser gzip-compresses config and, when needed, uploads in ≤256 KiB chunks.
 
 A pre-API Nginx snapshot is kept as `devops/nginx/welllabs.conf.legacy`. Without the larger body size, uploads fail with **413 Request Entity Too Large**. Keep QFieldCloud tokens out of source control.
 

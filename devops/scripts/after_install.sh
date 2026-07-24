@@ -15,6 +15,7 @@ CURRENT_LINK="${APP_BASE}/current"
 API_VENV="${APP_BASE}/api-venv"
 # Production has historically used conf.d — keep updating that path only
 NGINX_CONF="/etc/nginx/conf.d/welllabs.conf"
+NGINX_UPLOAD_LIMITS="/etc/nginx/conf.d/00-upload-limits.conf"
 SYSTEMD_UNIT="/etc/systemd/system/welllabs-api.service"
 KEEP_RELEASES=3
 
@@ -64,6 +65,8 @@ if [ -f "${NGINX_CONF}" ]; then
 fi
 
 cp "${RELEASE_DIR}/devops/nginx/welllabs.conf" "${NGINX_CONF}"
+# http-context body size (survives even if a server block omits the directive)
+cp "${RELEASE_DIR}/devops/nginx/00-upload-limits.conf" "${NGINX_UPLOAD_LIMITS}"
 rm -f /etc/nginx/sites-enabled/default
 
 if ! nginx -t; then
@@ -73,11 +76,12 @@ if ! nginx -t; then
     cp "${LATEST_BAK}" "${NGINX_CONF}"
     echo "  → Restored ${LATEST_BAK}"
   fi
+  rm -f "${NGINX_UPLOAD_LIMITS}"
   exit 1
 fi
 
 systemctl reload nginx
-echo "  → Nginx config installed and reloaded (client_max_body_size 512m, /api → :8001)."
+echo "  → Nginx config installed and reloaded (client_max_body_size 512m via server + 00-upload-limits, /api → :8001)."
 
 # ── 4. Python runtime + shared venv for FastAPI ──────────────
 echo "[4/7] Ensuring Python venv and API dependencies..."
