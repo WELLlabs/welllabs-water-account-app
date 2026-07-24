@@ -91,15 +91,16 @@ Supported budget crops include Paddy, Cotton, Groundnut, Pulses, Millets, Sunflo
 
 The frontend build does not embed FastAPI. Production deployments must run the Python API separately and route `/api` to it. Keep QFieldCloud tokens out of source control and environment files out of Git.
 
-Nginx must allow large request bodies for form export (GeoJSON plot boundaries). The shipped config sets `client_max_body_size 64m` and proxies `/api/` to `127.0.0.1:8001`. Without that, uploads fail with **413 Request Entity Too Large**.
+Nginx must allow large request bodies for form export (GeoJSON plot boundaries). The shipped config at `devops/nginx/welllabs.conf` sets `client_max_body_size 64m` and proxies `/api/` to `127.0.0.1:8001`. CodeDeploy installs it to **`/etc/nginx/conf.d/welllabs.conf`** (the historical path). A pre-API copy is kept as `devops/nginx/welllabs.conf.legacy`. Without the larger body size, uploads fail with **413 Request Entity Too Large**.
 
 To apply immediately on an existing server (before the next deploy):
 
 ```bash
-sudo nano /etc/nginx/sites-available/welllabs   # or wherever the site config lives
-# add inside the server { } block:
-#   client_max_body_size 64m;
-# and ensure location /api/ proxies to the FastAPI process
+sudo cp /etc/nginx/conf.d/welllabs.conf /etc/nginx/conf.d/welllabs.conf.bak
+# then update /etc/nginx/conf.d/welllabs.conf with client_max_body_size 64m
+# and a location /api/ proxy to 127.0.0.1:8001
 
 sudo nginx -t && sudo systemctl reload nginx
 ```
+
+Also remove any leftover `/etc/nginx/sites-enabled/welllabs` from a failed deploy so zones are not duplicated.
