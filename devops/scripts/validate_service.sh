@@ -35,22 +35,22 @@ HTTP_API="000"
 while [ "${HTTP_API}" != "200" ]; do
   ATTEMPT=$((ATTEMPT + 1))
   if [ "${ATTEMPT}" -gt "${MAX_RETRIES}" ]; then
-    echo "✗ FAIL: uvicorn /api/health not ready after $((MAX_RETRIES * RETRY_INTERVAL))s (last HTTP ${HTTP_API})."
+    echo "✗ FAIL: uvicorn /fwa-api/health not ready after $((MAX_RETRIES * RETRY_INTERVAL))s (last HTTP ${HTTP_API})."
     journalctl -u welllabs-api -n 40 --no-pager || true
     exit 1
   fi
   HTTP_API=$(curl --silent -o /dev/null -w "%{http_code}" \
-        --max-time 5 http://127.0.0.1:8001/api/health 2>/dev/null || echo "000")
+        --max-time 5 http://127.0.0.1:8010/fwa-api/health 2>/dev/null || echo "000")
   if [ "${HTTP_API}" != "200" ]; then
     echo "  → attempt ${ATTEMPT}/${MAX_RETRIES}: HTTP ${HTTP_API}, retrying..."
     sleep "${RETRY_INTERVAL}"
   fi
 done
-echo "  → uvicorn /api/health HTTP ${HTTP_API} OK."
+echo "  → uvicorn /fwa-api/health HTTP ${HTTP_API} OK."
 
 # ── 3. HTTP response from Nginx (SPA + proxied API) ──────────
 # Port 80 serves the app directly — accept 2xx and 3xx as healthy.
-echo "[3/4] Polling http://127.0.0.1/ and /api/health via Nginx..."
+echo "[3/4] Polling http://127.0.0.1/ and /fwa-api/health via Nginx..."
 ATTEMPT=0
 HTTP_CODE="000"
 while [[ ! "${HTTP_CODE}" =~ ^(200|301|302)$ ]]; do
@@ -73,17 +73,17 @@ HTTP_PROXY="000"
 while [ "${HTTP_PROXY}" != "200" ]; do
   ATTEMPT=$((ATTEMPT + 1))
   if [ "${ATTEMPT}" -gt "${MAX_RETRIES}" ]; then
-    echo "✗ FAIL: Nginx /api/health not ready after $((MAX_RETRIES * RETRY_INTERVAL))s (last HTTP ${HTTP_PROXY})."
+    echo "✗ FAIL: Nginx /fwa-api/health not ready after $((MAX_RETRIES * RETRY_INTERVAL))s (last HTTP ${HTTP_PROXY})."
     exit 1
   fi
   HTTP_PROXY=$(curl --silent -o /dev/null -w "%{http_code}" \
-        --max-time 5 http://127.0.0.1/api/health 2>/dev/null || echo "000")
+        --max-time 5 http://127.0.0.1/fwa-api/health 2>/dev/null || echo "000")
   if [ "${HTTP_PROXY}" != "200" ]; then
     echo "  → attempt ${ATTEMPT}/${MAX_RETRIES}: HTTP ${HTTP_PROXY}, retrying..."
     sleep "${RETRY_INTERVAL}"
   fi
 done
-echo "  → Nginx /api/health HTTP ${HTTP_PROXY} OK."
+echo "  → Nginx /fwa-api/health HTTP ${HTTP_PROXY} OK."
 
 # ── 4. Symlink and build integrity ───────────────────────────
 echo "[4/4] Checking symlink and build files..."

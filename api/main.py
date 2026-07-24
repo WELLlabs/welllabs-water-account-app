@@ -30,7 +30,7 @@ app.add_middleware(
 )
 
 
-@app.get("/api/health")
+@app.get("/fwa-api/health")
 async def health():
     return {"ok": True, "service": "qgz-api", "version": "1.1.0"}
 
@@ -72,7 +72,7 @@ def _build_response(config_obj: dict) -> Response:
     )
 
 
-@app.post("/api/generate-qgz")
+@app.post("/fwa-api/generate-qgz")
 async def generate_qgz(request: Request):
     """
     Generate a QGZ project (data.gpkg + .qgs).
@@ -119,7 +119,7 @@ async def generate_qgz(request: Request):
     return _build_response(config_obj)
 
 
-@app.post("/api/generate-qgz/init")
+@app.post("/fwa-api/generate-qgz/init")
 async def generate_qgz_init():
     """Start a chunked upload session (each chunk stays under ~512 KiB)."""
     upload_id = uuid.uuid4().hex
@@ -128,7 +128,7 @@ async def generate_qgz_init():
     return {"upload_id": upload_id}
 
 
-@app.put("/api/generate-qgz/chunk/{upload_id}/{index}")
+@app.put("/fwa-api/generate-qgz/chunk/{upload_id}/{index}")
 async def generate_qgz_chunk(upload_id: str, index: int, request: Request):
     """Store one chunk. `index` is 0-based. Body max should stay under 512 KiB."""
     if not upload_id.isalnum() or len(upload_id) > 64:
@@ -148,7 +148,7 @@ async def generate_qgz_chunk(upload_id: str, index: int, request: Request):
     return {"ok": True, "index": index, "bytes": len(raw)}
 
 
-@app.post("/api/generate-qgz/complete/{upload_id}")
+@app.post("/fwa-api/generate-qgz/complete/{upload_id}")
 async def generate_qgz_complete(upload_id: str, request: Request):
     """
     Assemble chunks and build the QGZ.

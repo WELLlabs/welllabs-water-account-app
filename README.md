@@ -47,13 +47,10 @@ npm install
 npm run setup:api
 npm run dev
 ```
-
-`npm run dev` starts both services:
-
 - SvelteKit/Vite: `http://localhost:5173`
-- FastAPI: `http://127.0.0.1:8001`
+- FastAPI: `http://127.0.0.1:8010` (routes under `/fwa-api/…`)
 
-Vite proxies `/api` requests to FastAPI. If port 5173 is occupied, use the alternate URL printed by Vite.
+Vite proxies `/fwa-api` to FastAPI. If port 5173 is occupied, use the alternate URL printed by Vite.
 
 Useful commands:
 
@@ -66,12 +63,14 @@ npm run build     # production frontend build
 
 ## QGZ export flow
 
-1. The browser compacts plot GeoJSON (kept columns only, rounded coordinates), gzip-compresses it, and posts to `/api/generate-qgz`.
-2. If the payload is still large (or a single POST is rejected with 413), it uploads in ≤256 KiB chunks via `/api/generate-qgz/init|chunk|complete`.
+1. The browser compacts plot GeoJSON (kept columns only, rounded coordinates), gzip-compresses it, and posts to `/fwa-api/generate-qgz`.
+2. If the payload is still large (or a single POST is rejected with 413), it uploads in ≤256 KiB chunks via `/fwa-api/generate-qgz/init|chunk|complete`.
 3. FastAPI writes `data.gpkg` with farm plots and lookup layers.
 4. FastAPI builds the QGIS project XML and returns a base QGZ.
 5. The browser adds selected MBTiles or GeoTIFF files without uploading those large files to the API.
 6. The completed QGZ can be downloaded or pushed to QFieldCloud.
+
+> **Note:** Paths use `/fwa-api/…`, not `/api/…`. On the shared WELL Labs host, Django already owns `/api/` (e.g. `api/watershed/`).
 
 Internet basemaps require connectivity in QGIS/QField. MBTiles and GeoTIFF files are bundled for offline use.
 
@@ -92,21 +91,21 @@ Supported budget crops include Paddy, Cotton, Groundnut, Pulses, Millets, Sunflo
 
 CodeDeploy ships the static `build/` plus the `api/` package. After install it:
 
-1. Installs Nginx config (`client_max_body_size 512m`, `/api/` → `127.0.0.1:8001`) to **`/etc/nginx/conf.d/welllabs.conf`**, plus http-level **`/etc/nginx/conf.d/00-upload-limits.conf`**.
+1. Installs Nginx config (`client_max_body_size 512m`, `/fwa-api/` → `127.0.0.1:8010`) to **`/etc/nginx/conf.d/welllabs.conf`**, plus http-level **`/etc/nginx/conf.d/00-upload-limits.conf`**.
 2. Creates a shared venv at `/opt/welllabs/api-venv` and installs `api/requirements.txt`.
-3. Installs the systemd unit `welllabs-api.service` (uvicorn on port 8001).
-4. Restarts `welllabs-api` and reloads Nginx; ValidateService checks `/api/health` directly and via Nginx.
+3. Installs the systemd unit `welllabs-api.service` (uvicorn on port **8010**).
+4. Restarts `welllabs-api` and reloads Nginx; ValidateService checks `/fwa-api/health` directly and via Nginx.
 
 Form export no longer depends on a raised nginx body limit alone: the browser gzip-compresses config and, when needed, uploads in ≤256 KiB chunks.
 
-A pre-API Nginx snapshot is kept as `devops/nginx/welllabs.conf.legacy`. Without the larger body size, uploads fail with **413 Request Entity Too Large**. Keep QFieldCloud tokens out of source control.
+A pre-API Nginx snapshot is kept as `devops/nginx/welllabs.conf.legacy`. Keep QFieldCloud tokens out of source control.
 
 Useful on-server checks after deploy:
 
 ```bash
 systemctl status welllabs-api nginx
-curl -s http://127.0.0.1:8001/api/health
-curl -s http://127.0.0.1/api/health
-sudo grep client_max_body_size /etc/nginx/conf.d/welllabs.conf
+curl -s http://127.0.0.1:8010/fwa-api/health
+curl -s http://127.0.0.1/fwa-api/health
+sudo nginx -T 2>/dev/null | grep -A2 'location /fwa-api'
 sudo tail -50 /var/log/welllabs-deploy.log
 ```

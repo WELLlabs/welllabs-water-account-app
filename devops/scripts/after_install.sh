@@ -81,7 +81,7 @@ if ! nginx -t; then
 fi
 
 systemctl reload nginx
-echo "  → Nginx config installed and reloaded (client_max_body_size 512m via server + 00-upload-limits, /api → :8001)."
+echo "  → Nginx config installed and reloaded (client_max_body_size 512m, /fwa-api → :8010)."
 
 # ── 4. Python runtime + shared venv for FastAPI ──────────────
 echo "[4/7] Ensuring Python venv and API dependencies..."

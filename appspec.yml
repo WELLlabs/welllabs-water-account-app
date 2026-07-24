@@ -4,7 +4,7 @@ os: linux
 # ============================================================
 #  WELL LABS — AWS CodeDeploy AppSpec
 #  App Type   : SvelteKit SPA (static — ssr = false) + FastAPI
-#  Web Server : Nginx (static build/ + reverse proxy /api → :8001)
+#  Web Server : Nginx (static build/ + reverse proxy /fwa-api → :8010)
 #  Strategy   : Releases directory + atomic symlink swap
 # ============================================================
 

@@ -6,8 +6,8 @@ export default defineConfig({
 	plugins: [tailwindcss(), sveltekit()],
 	server: {
 		proxy: {
-			'/api': {
-				target: 'http://127.0.0.1:8001',
+			'/fwa-api': {
+				target: 'http://127.0.0.1:8010',
 				changeOrigin: true
 			}
 		}

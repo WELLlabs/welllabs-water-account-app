@@ -10,7 +10,7 @@ User=ubuntu
 Group=ubuntu
 WorkingDirectory=/opt/welllabs/current
 Environment=PATH=/opt/welllabs/api-venv/bin:/usr/local/bin:/usr/bin
-ExecStart=/opt/welllabs/api-venv/bin/uvicorn api.main:app --host 127.0.0.1 --port 8001 --workers 1
+ExecStart=/opt/welllabs/api-venv/bin/uvicorn api.main:app --host 127.0.0.1 --port 8010 --workers 1
 Restart=on-failure
 RestartSec=5
 # Large GeoJSON configs + long QGZ builds

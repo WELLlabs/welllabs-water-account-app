@@ -174,7 +174,7 @@ async function postConfigOnce(payload: Uint8Array, gzipped: boolean): Promise<Bl
 	};
 	if (gzipped) headers['Content-Encoding'] = 'gzip';
 
-	const res = await fetch('/api/generate-qgz', {
+	const res = await fetch('/fwa-api/generate-qgz', {
 		method: 'POST',
 		headers,
 		body: new Blob([payload as BlobPart])
@@ -184,14 +184,14 @@ async function postConfigOnce(payload: Uint8Array, gzipped: boolean): Promise<Bl
 }
 
 async function postConfigChunked(payload: Uint8Array, gzipped: boolean): Promise<Blob> {
-	const initRes = await fetch('/api/generate-qgz/init', { method: 'POST' });
+	const initRes = await fetch('/fwa-api/generate-qgz/init', { method: 'POST' });
 	if (!initRes.ok) throw new Error(await readError(initRes));
 	const { upload_id: uploadId } = (await initRes.json()) as { upload_id: string };
 
 	const totalChunks = Math.ceil(payload.byteLength / CHUNK_SIZE);
 	for (let i = 0; i < totalChunks; i++) {
 		const slice = payload.subarray(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
-		const chunkRes = await fetch(`/api/generate-qgz/chunk/${uploadId}/${i}`, {
+		const chunkRes = await fetch(`/fwa-api/generate-qgz/chunk/${uploadId}/${i}`, {
 			method: 'PUT',
 			headers: { 'Content-Type': 'application/octet-stream' },
 			body: new Blob([slice as BlobPart])
@@ -199,7 +199,7 @@ async function postConfigChunked(payload: Uint8Array, gzipped: boolean): Promise
 		if (!chunkRes.ok) throw new Error(await readError(chunkRes));
 	}
 
-	const completeRes = await fetch(`/api/generate-qgz/complete/${uploadId}`, {
+	const completeRes = await fetch(`/fwa-api/generate-qgz/complete/${uploadId}`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({
