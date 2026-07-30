@@ -8,6 +8,10 @@
 		buildSubGroupStats,
 		getGroupValue,
 		styleForGroup,
+		STROKE_WEIGHT,
+		STROKE_WEIGHT_SELECTED,
+		FILL_OPACITY,
+		FILL_OPACITY_SELECTED,
 		type GroupStats,
 		type OverallStats,
 		type ViewMode
@@ -44,18 +48,30 @@
 	let leafletModule = $state<typeof import('leaflet') | null>(null);
 	let geoJsonLayer: import('leaflet').GeoJSON | null = null;
 
-	const defaultStyle = {
+	/** Individual plots — yellow (stroke matches fill) */
+	const plotStyle = {
 		color: '#facc15',
-		weight: 3,
+		weight: STROKE_WEIGHT,
 		fillColor: '#facc15',
-		fillOpacity: 0.45
+		fillOpacity: FILL_OPACITY,
+		opacity: 1
 	};
 
-	const selectedStyle = {
+	const plotSelectedStyle = {
 		color: '#f472b6',
-		weight: 4,
+		weight: STROKE_WEIGHT_SELECTED,
 		fillColor: '#f472b6',
-		fillOpacity: 0.65
+		fillOpacity: FILL_OPACITY_SELECTED,
+		opacity: 1
+	};
+
+	/** Overall — lighter blue (same stroke nature) */
+	const overallStyle = {
+		color: '#93c5fd',
+		weight: STROKE_WEIGHT,
+		fillColor: '#93c5fd',
+		fillOpacity: FILL_OPACITY,
+		opacity: 1
 	};
 
 	const groupData = $derived.by(() => {
@@ -100,8 +116,6 @@
 		!!groupByColumn &&
 			groupData.groups.length > 0 &&
 			(viewMode === 'group' ||
-				viewMode === 'overall' ||
-				viewMode === 'plot' ||
 				(viewMode === 'subgroup' &&
 					(!selectedGroup || (!!subGroupByColumn && subGroupData.groups.length > 0))))
 	);
@@ -119,7 +133,7 @@
 	);
 
 	function featureStyle(feature: GeoJSON.Feature | undefined): import('leaflet').PathOptions {
-		if (!feature?.properties) return defaultStyle;
+		if (!feature?.properties) return plotStyle;
 		const props = feature.properties as FarmFeatureProperties;
 		const fid = props.fid;
 		const isSelectedPlot =
@@ -144,12 +158,7 @@
 			}
 
 			if (parentKey !== selectedGroup) {
-				return {
-					color: '#94a3b8',
-					weight: 1,
-					fillOpacity: 0,
-					opacity: 0.35
-				};
+				return styleForGroup('#94a3b8', { muted: true });
 			}
 
 			if (subGroupByColumn && subGroupData.colorByKey.size > 0) {
@@ -160,20 +169,14 @@
 				return styleForGroup(color, { selected: isSelectedSub, muted });
 			}
 
-			return defaultStyle;
+			return plotStyle;
 		}
 
-		// Individual / Overall — original filled plot styling
-		if (groupByColumn && groupData.colorByKey.size > 0) {
-			const key = getGroupValue(feature, groupByColumn);
-			const color = groupData.colorByKey.get(key) ?? '#94a3b8';
-			return styleForGroup(color, {
-				selected: viewMode === 'plot' && !!isSelectedPlot,
-				muted: false
-			});
+		// Individual / Overall — uniform styling (no group colour coding)
+		if (viewMode === 'overall') {
+			return overallStyle;
 		}
-
-		return isSelectedPlot ? selectedStyle : defaultStyle;
+		return isSelectedPlot ? plotSelectedStyle : plotStyle;
 	}
 
 	onMount(async () => {
@@ -211,6 +214,11 @@
 			.geoJSON(geojson, {
 				style: (feature) => featureStyle(feature),
 				onEachFeature: (feature, layer) => {
+					if (viewMode === 'overall') {
+						// Overall is farm-wide summary — plots are not selectable
+						(layer as import('leaflet').Path).options.interactive = false;
+						return;
+					}
 					layer.on('click', () => {
 						if (viewMode === 'group' && groupByColumn) {
 							const key = getGroupValue(feature, groupByColumn);
@@ -232,8 +240,6 @@
 								onSubGroupSelect(null);
 								onFeatureSelect(null);
 							}
-						} else if (viewMode === 'overall') {
-							onFeatureSelect(feature);
 						} else {
 							onFeatureSelect(feature);
 							onGroupSelect(null);
@@ -955,12 +961,6 @@
 			<div class="text-slate-500">
 				<h2 class="mb-4 text-xl font-semibold text-slate-700">Select a plot</h2>
 				<p>Click any polygon on the map to view farm details and monthly water requirements.</p>
-				{#if groupByColumn}
-					<p class="mt-2 text-sm">
-						Plots are coloured by <strong>{groupByColumn}</strong>. Switch to Groups, Sub-groups,
-						or Overall for aggregated water.
-					</p>
-				{/if}
 			</div>
 		{/if}
 	</aside>

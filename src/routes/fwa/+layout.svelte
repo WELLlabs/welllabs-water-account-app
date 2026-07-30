@@ -4,5 +4,9 @@
 	let { children } = $props();
 </script>
 
+<svelte:head>
+	<title>Farm Water Accounting</title>
+</svelte:head>
+
 <AppNav />
 {@render children()}

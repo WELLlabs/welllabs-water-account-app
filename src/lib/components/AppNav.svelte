@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/stores';
+	import BrandAiMark from '$lib/components/BrandAiMark.svelte';
 
 	const links = [
 		{ href: '/fwa', label: 'Home', exact: true },
@@ -17,7 +18,8 @@
 </script>
 
 <nav class="border-b border-[color-mix(in_srgb,#00296b_12%,white)] bg-white">
-	<div class="mx-auto flex max-w-7xl flex-wrap items-center gap-4 px-6 py-3">
+	<div class="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-4 px-6 py-3">
+		<BrandAiMark heightRem={2} maxWidthPx={180} />
 		<div class="flex flex-wrap gap-1">
 			{#each links as link}
 				<a

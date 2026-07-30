@@ -1,4 +1,6 @@
 <script lang="ts">
+	import BrandAiMark from '$lib/components/BrandAiMark.svelte';
+
 	const dataProducts = [
 		{
 			title: 'Bangalore Citizen Observatory',
@@ -65,17 +67,14 @@
 </script>
 
 <svelte:head>
-	<title>ai.welllabs.org — WELL Labs</title>
+	<title>Well Labs AI</title>
 </svelte:head>
 
 <div class="landing">
 	<!-- Top bar -->
 	<header class="landing-bar">
 		<div class="landing-bar-inner">
-			<a href="/" class="brand">
-				<span class="brand-mark">WELL Labs</span>
-				<span class="brand-sub">ai.welllabs.org</span>
-			</a>
+			<BrandAiMark heightRem={2.4} maxWidthPx={260} />
 			<a
 				href="https://welllabs.org"
 				target="_blank"
@@ -231,8 +230,8 @@
 
 	.brand {
 		display: flex;
-		flex-direction: column;
-		gap: 0.05rem;
+		align-items: center;
+		gap: 0.55rem;
 		text-decoration: none;
 		color: inherit;
 	}

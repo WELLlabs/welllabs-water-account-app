@@ -299,7 +299,11 @@
 			} else if (type === 'csv') {
 				downloadCsv(geojson, fileName);
 			} else {
-				await downloadPdf(geojson, fileName);
+				await downloadPdf(geojson, fileName, {
+					viewMode,
+					groupByColumn,
+					subGroupByColumn
+				});
 			}
 		} catch (err) {
 			error =
@@ -310,6 +314,23 @@
 			exporting = false;
 		}
 	}
+
+	const segmentExportLabel = $derived(
+		viewMode === 'group'
+			? 'Export group'
+			: viewMode === 'subgroup'
+				? 'Export sub groups'
+				: viewMode === 'overall'
+					? 'Export overall'
+					: 'Export individual plots'
+	);
+
+	const segmentExportDisabled = $derived(
+		exporting ||
+			loading ||
+			(viewMode === 'group' && !groupByColumn) ||
+			(viewMode === 'subgroup' && (!groupByColumn || !subGroupByColumn))
+	);
 </script>
 
 <main
@@ -432,65 +453,6 @@
 					</label>
 				</div>
 			</div>
-
-			{#if geojson}
-				<div class="relative" bind:this={exportMenuRef}>
-					<button
-						type="button"
-						class="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-blue-600 bg-blue-600/10 px-4 py-2 text-sm font-semibold text-blue-700 transition-colors hover:bg-blue-600/20 disabled:cursor-not-allowed disabled:opacity-60"
-						onclick={(event) => {
-							event.stopPropagation();
-							exportMenuOpen = !exportMenuOpen;
-						}}
-						disabled={exporting || loading}
-					>
-						{exporting ? 'Exporting…' : 'Export'}
-						<svg
-							class="h-4 w-4 transition-transform {exportMenuOpen ? 'rotate-180' : ''}"
-							viewBox="0 0 20 20"
-							fill="currentColor"
-							aria-hidden="true"
-						>
-							<path
-								fill-rule="evenodd"
-								d="M5.23 7.21a.75.75 0 011.06.02L10 10.94l3.71-3.71a.75.75 0 111.06 1.06l-4.24 4.25a.75.75 0 01-1.06 0L5.21 8.29a.75.75 0 01.02-1.08z"
-								clip-rule="evenodd"
-							/>
-						</svg>
-					</button>
-
-					{#if exportMenuOpen}
-						<div
-							class="absolute right-0 z-20 mt-1 min-w-[10rem] overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-lg"
-						>
-							<button
-								type="button"
-								class="block w-full px-4 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
-								onclick={() => handleExport('gpkg')}
-								disabled={exporting}
-							>
-								Export GPKG
-							</button>
-							<button
-								type="button"
-								class="block w-full px-4 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
-								onclick={() => handleExport('csv')}
-								disabled={exporting}
-							>
-								Export CSV
-							</button>
-							<button
-								type="button"
-								class="block w-full px-4 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
-								onclick={() => handleExport('pdf')}
-								disabled={exporting}
-							>
-								Export PDF
-							</button>
-						</div>
-					{/if}
-				</div>
-			{/if}
 		</div>
 	{/if}
 
@@ -571,7 +533,7 @@
 	{/if}
 
 	{#if geojson}
-		<!-- View mode + group-by controls -->
+		<!-- View mode + segment controls -->
 		<div
 			class="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3"
 		>
@@ -614,45 +576,106 @@
 			</div>
 
 			<div class="flex flex-wrap items-center gap-3">
-				<label class="flex items-center gap-2 text-sm text-slate-700">
-					<span class="font-semibold">Group by</span>
-					<select
-						class="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm text-slate-900"
-						value={groupByColumn}
-						onchange={(e) => {
-							groupByColumn = (e.target as HTMLSelectElement).value;
-							selectedGroup = null;
-							selectedSubGroup = null;
-							if (subGroupByColumn === groupByColumn) {
-								subGroupByColumn =
-									groupableColumns.find((c) => c !== groupByColumn) ?? '';
-							}
-						}}
-					>
-						<option value="">None</option>
-						{#each groupableColumns as col}
-							<option value={col}>{col}</option>
-						{/each}
-					</select>
-				</label>
+				{#if viewMode === 'group' || viewMode === 'subgroup'}
+					<label class="flex items-center gap-2 text-sm text-slate-700">
+						<span class="font-semibold">Group by</span>
+						<select
+							class="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm text-slate-900"
+							value={groupByColumn}
+							onchange={(e) => {
+								groupByColumn = (e.target as HTMLSelectElement).value;
+								selectedGroup = null;
+								selectedSubGroup = null;
+								if (subGroupByColumn === groupByColumn) {
+									subGroupByColumn =
+										groupableColumns.find((c) => c !== groupByColumn) ?? '';
+								}
+							}}
+						>
+							<option value="">Select…</option>
+							{#each groupableColumns as col}
+								<option value={col}>{col}</option>
+							{/each}
+						</select>
+					</label>
+				{/if}
 
-				<label class="flex items-center gap-2 text-sm text-slate-700">
-					<span class="font-semibold">Then by</span>
-					<select
-						class="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm text-slate-900 disabled:opacity-50"
-						value={subGroupByColumn}
-						disabled={!groupByColumn}
-						onchange={(e) => {
-							subGroupByColumn = (e.target as HTMLSelectElement).value;
-							selectedSubGroup = null;
+				{#if viewMode === 'subgroup'}
+					<label class="flex items-center gap-2 text-sm text-slate-700">
+						<span class="font-semibold">Then by</span>
+						<select
+							class="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-sm text-slate-900 disabled:opacity-50"
+							value={subGroupByColumn}
+							disabled={!groupByColumn}
+							onchange={(e) => {
+								subGroupByColumn = (e.target as HTMLSelectElement).value;
+								selectedSubGroup = null;
+							}}
+						>
+							<option value="">Select…</option>
+							{#each groupableColumns.filter((c) => c !== groupByColumn) as col}
+								<option value={col}>{col}</option>
+							{/each}
+						</select>
+					</label>
+				{/if}
+
+				<div class="relative" bind:this={exportMenuRef}>
+					<button
+						type="button"
+						class="inline-flex items-center gap-1.5 rounded-lg border border-blue-600 bg-blue-600/10 px-3 py-1.5 text-sm font-semibold text-blue-700 transition-colors hover:bg-blue-600/20 disabled:cursor-not-allowed disabled:opacity-60"
+						onclick={(event) => {
+							event.stopPropagation();
+							exportMenuOpen = !exportMenuOpen;
 						}}
+						disabled={segmentExportDisabled}
 					>
-						<option value="">None</option>
-						{#each groupableColumns.filter((c) => c !== groupByColumn) as col}
-							<option value={col}>{col}</option>
-						{/each}
-					</select>
-				</label>
+						{exporting ? 'Exporting…' : segmentExportLabel}
+						<svg
+							class="h-4 w-4 transition-transform {exportMenuOpen ? 'rotate-180' : ''}"
+							viewBox="0 0 20 20"
+							fill="currentColor"
+							aria-hidden="true"
+						>
+							<path
+								fill-rule="evenodd"
+								d="M5.23 7.21a.75.75 0 011.06.02L10 10.94l3.71-3.71a.75.75 0 111.06 1.06l-4.24 4.25a.75.75 0 01-1.06 0L5.21 8.29a.75.75 0 01.02-1.08z"
+								clip-rule="evenodd"
+							/>
+						</svg>
+					</button>
+
+					{#if exportMenuOpen}
+						<div
+							class="absolute right-0 z-20 mt-1 min-w-[11rem] overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-lg"
+						>
+							<button
+								type="button"
+								class="block w-full px-4 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+								onclick={() => handleExport('pdf')}
+								disabled={exporting}
+							>
+								Export PDF
+							</button>
+							<button
+								type="button"
+								class="block w-full px-4 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+								onclick={() => handleExport('csv')}
+								disabled={exporting}
+							>
+								Export CSV
+							</button>
+							<button
+								type="button"
+								class="block w-full px-4 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+								onclick={() => handleExport('gpkg')}
+								disabled={exporting}
+							>
+								Export GPKG
+							</button>
+						</div>
+					{/if}
+				</div>
 			</div>
 		</div>
 
@@ -666,9 +689,7 @@
 			{selectedSubGroup}
 			onFeatureSelect={(feature) => {
 				selectedFeature = feature;
-				if (feature && viewMode === 'overall') {
-					// Peeking a plot from overall keeps overall mode
-				} else if (feature) {
+				if (feature) {
 					viewMode = 'plot';
 				}
 			}}

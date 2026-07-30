@@ -107,6 +107,13 @@ export function getGroupValue(feature: GeoJSON.Feature, column: string): string 
 	return String(raw);
 }
 
+/** Shared stroke / fill treatment across plot, group, subgroup, and overall views */
+export const STROKE_WEIGHT = 2.5;
+export const STROKE_WEIGHT_SELECTED = 3.5;
+export const FILL_OPACITY = 0.45;
+export const FILL_OPACITY_SELECTED = 0.65;
+export const FILL_OPACITY_MUTED = 0.12;
+
 export function styleForGroup(
 	fillColor: string,
 	opts: { selected?: boolean; muted?: boolean } = {}
@@ -114,20 +121,21 @@ export function styleForGroup(
 	const { selected = false, muted = false } = opts;
 	return {
 		color: fillColor,
-		weight: selected ? 4 : 3,
+		weight: selected ? STROKE_WEIGHT_SELECTED : STROKE_WEIGHT,
 		fillColor,
-		fillOpacity: muted ? 0.1 : selected ? 0.7 : 0.5,
-		opacity: muted ? 0.35 : 1
+		fillOpacity: muted ? FILL_OPACITY_MUTED : selected ? FILL_OPACITY_SELECTED : FILL_OPACITY,
+		opacity: muted ? 0.4 : 1
 	};
 }
 
-/** Outline-only style for Individual plots mode */
+/** Outline-only style (same stroke nature as filled styles) */
 export function outlineStyle(opts: { selected?: boolean } = {}): import('leaflet').PathOptions {
 	const selected = opts.selected ?? false;
+	const color = selected ? '#f472b6' : '#facc15';
 	return {
-		color: selected ? '#f472b6' : '#facc15',
-		weight: selected ? 4 : 2.5,
-		fillColor: selected ? '#f472b6' : '#facc15',
+		color,
+		weight: selected ? STROKE_WEIGHT_SELECTED : STROKE_WEIGHT,
+		fillColor: color,
 		fillOpacity: selected ? 0.25 : 0,
 		opacity: 1
 	};
@@ -135,9 +143,9 @@ export function outlineStyle(opts: { selected?: boolean } = {}): import('leaflet
 
 /** Single-farm outline (overall mode) */
 export const farmOutlineStyle: import('leaflet').PathOptions = {
-	color: '#facc15',
-	weight: 3,
-	fillColor: '#facc15',
+	color: '#93c5fd',
+	weight: STROKE_WEIGHT,
+	fillColor: '#93c5fd',
 	fillOpacity: 0,
 	opacity: 1
 };
