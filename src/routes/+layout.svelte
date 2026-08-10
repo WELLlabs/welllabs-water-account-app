@@ -1,7 +1,17 @@
 <script lang="ts">
+	import { afterNavigate } from '$app/navigation';
 	import '../app.css';
 
 	let { children } = $props();
+
+	const GA_MEASUREMENT_ID = 'G-XFJ86RWKGG';
+
+	afterNavigate(({ to }) => {
+		if (!to || typeof window.gtag !== 'function') return;
+		window.gtag('config', GA_MEASUREMENT_ID, {
+			page_path: to.url.pathname + to.url.search
+		});
+	});
 </script>
 
 <svelte:head>
