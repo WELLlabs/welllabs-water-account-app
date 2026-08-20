@@ -1,176 +1,285 @@
 <script lang="ts">
 	import BrandAiMark from '$lib/components/BrandAiMark.svelte';
 
-	const dataProducts = [
+	const dataLayers = [
 		{
-			title: 'Bangalore Citizen Observatory',
+			title: 'Bengaluru Citizen Observatory',
 			description:
-				'We have been collecting data about the city infrastructure and flooding across Bangalore. This GEE App provides all of these datasets.',
+				'This GEE app includes layers pertaining to the administrative boundaries of Bengaluru, along with hydrology layers such as watersheds, catchments, drainage networks, and flood risk zones. In addition, we have layers that highlight rejuvenation work undertaken in the city.',
 			href: 'https://gcp-welllabs.projects.earthengine.app/view/urban-water'
 		},
 		{
 			title: 'Rural Futures',
 			description:
-				'To support all of our work in Karnataka and Raichur, we have populated a number of spatial datasets in this GEE App.',
+				'This GEE app contains data layers relating to the state of Karnataka, where both our transformation labs are located. It has layers relating to the administrative boundaries, land use, hydrological features such as watersheds, drainage, etc., and finally details of the canal command in the Raichur district, which is one of our transformation labs.',
 			href: 'https://gcp-welllabs.projects.earthengine.app/view/rural-futures'
 		},
 		{
-			title: 'River Water Data Quality',
+			title: 'River Water Quality Data',
 			description:
-				'The CPCB publishes river water quality data for rivers across various sites in India. This has the complete dataset indexed.',
+				'The Central Pollution Control Board collects data on water quality across the length of all major Indian rivers. This GEE App brings all of that data synthesised in a form where you can look at the water quality by station across a 12-year period.',
 			href: 'https://gcp-welllabs.projects.earthengine.app/view/india-river-water-quality'
 		},
 		{
 			title: 'Groundwater Data',
 			description:
-				'The CGWB tracks and monitors groundwater data across thousands of wells across India. This GEE App populates all of the data spatially and makes temporal data for each well available on selection.',
+				'The Central Ground Water Board monitors thousands of wells across India where it collects groundwater levels. This GEE App contains the data across 5 years for the wells tracked. This makes the data accessible spatially.',
 			href: 'https://gcp-welllabs.projects.earthengine.app/view/ground-water-mapping'
 		}
 	];
 
-	const platforms = [
+	const digitalSolutions = [
 		{
-			title: 'Water Security Toolkit',
+			title: 'Farm Water Accounting',
 			description:
-				'The Technical Consulting team at WELL Labs has developed the Water Security Toolkit that allows you to Diagnose, Design, and Assess water solutions in rural landscapes across India. The toolkit uses GIS layers in combination with local intelligence to diagnose problems with hydrology at its core and suggest appropriate solutions.',
-			status: 'coming' as const,
-			href: null
-		},
-		{
-			title: 'Farm Water Accounting App',
-			description:
-				'In canal command areas, there is a need to match the demand and supply of water in the landscape. Farmer Collectives can determine the cropping across an entire Water User Cooperative Society, and this can be used to estimate the water demand. The demand can then be matched with the supply available at the dam to determine equity.',
+				'The Farm Water Accounting App helps match water demand and supply in rural landscapes. Farmer collectives can map cropping patterns across a Water User Association to estimate demand, then balance it against supply available to assess equity. The toolset includes creating QField-ready survey forms, visualising collected data, planning crop water use, and balancing supply components in millimetres.',
 			status: 'live' as const,
 			href: '/fwa'
 		},
 		{
-			title: 'Climate Solutions Platform',
+			title: 'Water Security Toolbox',
 			description:
-				'As a part of our Urban Water Program, we are developing a platform that would highlight nature based solutions that can be deployed across Bangalore to reduce flooding in the city.',
+				'The Water Security Toolbox makes hydrology accessible for field-level water security programmes across rural India. It combines GIS layers with local intelligence to power three tools that scientifically diagnose problems in a landscape, design relevant solutions, and assess the impact of interventions through continuous monitoring.',
+			status: 'coming' as const,
+			href: null
+		},
+		{
+			title: 'Wastewater Audit Tool',
+			description:
+				'To help Resident Welfare Associations that run decentralised sewage treatment plants (STPs) face and manage audits of their STPs. The tool also helps them evaluate upgrades and repairs.',
+			status: 'coming' as const,
+			href: null
+		},
+		{
+			title: 'Bengaluru Flood Reporting Tool',
+			description:
+				'We have built a tool to collect flooding data points across Bengaluru using this citizen engagement tool to better calibrate flood models.',
 			status: 'coming' as const,
 			href: null
 		}
 	];
 
-	const pipelines = [
-		{
-			title: 'Canal Vegetation Identification',
-			description:
-				'We are developing an AI pipeline that will allow canal operators to feed drone data and identify vegetation along the chainage of the canal. This will be helpful in planning repair and maintenance of the canal.'
-		},
-		{
-			title: 'Floodwater Depth',
-			description:
-				'We are developing an AI pipeline that can assess flooding images and deliver depth data based on various objects in the field of view. This can be used to generate flooding datasets in urban landscapes.'
+	/** Triplicate for seamless endless scroll */
+	const carouselLayers = [...dataLayers, ...dataLayers, ...dataLayers];
+
+	let carouselEl = $state<HTMLElement | null>(null);
+	let scrolling = false;
+
+	function thumbSrc(title: string): string {
+		return `/landing_page_images/${encodeURIComponent(title)}.png`;
+	}
+
+	function onThumbError(e: Event) {
+		const img = e.currentTarget as HTMLImageElement;
+		img.style.display = 'none';
+		const fallback = img.nextElementSibling as HTMLElement | null;
+		if (fallback) fallback.hidden = false;
+	}
+
+	function setWidth(): number {
+		const el = carouselEl;
+		if (!el) return 0;
+		return el.scrollWidth / 3;
+	}
+
+	function cardStep(): number {
+		const el = carouselEl;
+		if (!el) return 0;
+		const card = el.querySelector('.layer-card') as HTMLElement | null;
+		if (!card) return el.clientWidth * 0.3;
+		const styles = getComputedStyle(el);
+		const gap = parseFloat(styles.columnGap || styles.gap || '12') || 12;
+		return card.offsetWidth + gap;
+	}
+
+	/** Keep scroll position inside the middle copy of the loop */
+	function normalizeLoop(instant = false) {
+		const el = carouselEl;
+		if (!el) return;
+		const w = setWidth();
+		if (w <= 0) return;
+		if (el.scrollLeft < w * 0.5) {
+			if (instant) el.style.scrollBehavior = 'auto';
+			el.scrollLeft += w;
+			if (instant) el.style.scrollBehavior = '';
+		} else if (el.scrollLeft >= w * 1.5) {
+			if (instant) el.style.scrollBehavior = 'auto';
+			el.scrollLeft -= w;
+			if (instant) el.style.scrollBehavior = '';
 		}
-	];
+	}
+
+	function onCarouselScroll() {
+		if (scrolling) return;
+		normalizeLoop(true);
+	}
+
+	async function scrollCarousel(dir: -1 | 1) {
+		const el = carouselEl;
+		if (!el || scrolling) return;
+		scrolling = true;
+		const step = cardStep();
+		el.scrollBy({ left: dir * step, behavior: 'smooth' });
+		await new Promise<void>((resolve) => {
+			let settled = false;
+			const done = () => {
+				if (settled) return;
+				settled = true;
+				el.removeEventListener('scrollend', done);
+				resolve();
+			};
+			el.addEventListener('scrollend', done, { once: true });
+			setTimeout(done, 500);
+		});
+		normalizeLoop(true);
+		scrolling = false;
+	}
+
+	$effect(() => {
+		const el = carouselEl;
+		if (!el) return;
+		// Start in the middle set so both directions are endless
+		requestAnimationFrame(() => {
+			const w = setWidth();
+			if (w > 0) {
+				el.style.scrollBehavior = 'auto';
+				el.scrollLeft = w;
+				el.style.scrollBehavior = '';
+			}
+		});
+	});
 </script>
 
 <svelte:head>
-	<title>Well Labs AI</title>
+	<title>AI @ WELL Labs</title>
 </svelte:head>
 
 <div class="landing">
-	<!-- Top bar -->
 	<header class="landing-bar">
 		<div class="landing-bar-inner">
-			<BrandAiMark heightRem={2.4} maxWidthPx={260} />
-			<a
-				href="https://welllabs.org"
-				target="_blank"
-				rel="noopener noreferrer"
-				class="bar-cta"
-			>
-				WELL Labs Website
+			<a href="/" class="brand-link" aria-label="AI @ WELL Labs home">
+				<BrandAiMark heightRem={2.4} maxWidthPx={260} />
 			</a>
+			<nav class="bar-nav" aria-label="Primary">
+				<a href="/about" class="bar-link">About</a>
+				<a href="/contact" class="bar-link">Contact Us</a>
+				<a
+					href="https://welllabs.org"
+					target="_blank"
+					rel="noopener noreferrer"
+					class="bar-cta"
+				>
+					WELL Labs Website
+				</a>
+			</nav>
 		</div>
 	</header>
 
-	<!-- Hero -->
 	<section class="hero">
 		<div class="hero-wash" aria-hidden="true"></div>
 		<div class="hero-inner">
-			<p class="hero-kicker">WELL Labs</p>
-			<h1 class="hero-title">Data and tools for water landscapes</h1>
+			<h1 class="hero-title">Data Layers. Digital Solutions.</h1>
 			<p class="hero-lead">
-				At WELL Labs, we work in both the urban and rural landscapes. Our work in both areas begins
-				with science, which requires data. We have been producing data products for this work and
-				are publishing them for use by any organisation working in the same landscapes.
-			</p>
-			<p class="hero-lead hero-lead-secondary">
-				We are developing a number of tools that are focused on expanding the agency of those
-				working in the landscapes. You can find them all hosted here.
+				Open data and digital tools from WELL Labs - built so those closest to the problem can act
+				on it
 			</p>
 		</div>
 	</section>
 
-	<!-- Data Products -->
-	<section class="section">
+	<section class="section section-layers">
 		<div class="section-inner">
 			<div class="section-head">
-				<h2>Data Products</h2>
-				<p>Spatial datasets and Earth Engine apps for urban and rural water work.</p>
+				<h2>Data Layers</h2>
+				<p>
+					We wanted to make datasets on water released by the government, as well as synthesised by
+					WELL Labs, easier to access and visualise spatially.
+				</p>
 			</div>
-			<div class="product-list">
-				{#each dataProducts as product}
-					<a class="product-row" href={product.href} target="_blank" rel="noopener noreferrer">
-						<div>
+		</div>
+		<div class="carousel">
+			<button
+				type="button"
+				class="carousel-arrow carousel-arrow-prev"
+				aria-label="Previous data layers"
+				onclick={() => scrollCarousel(-1)}
+			>
+				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
+					<path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
+				</svg>
+			</button>
+			<div
+				class="product-list"
+				bind:this={carouselEl}
+				onscroll={onCarouselScroll}
+			>
+				{#each carouselLayers as product, i (i)}
+					<a class="layer-card" href={product.href} target="_blank" rel="noopener noreferrer">
+						<div class="thumb thumb-layer" aria-hidden="true">
+							<img src={thumbSrc(product.title)} alt="" loading="lazy" onerror={onThumbError} />
+							<span class="thumb-fallback" hidden></span>
+						</div>
+						<div class="layer-body">
 							<h3>{product.title}</h3>
 							<p>{product.description}</p>
+							<span class="explore-cta">Explore layer</span>
 						</div>
-						<span class="product-link">Open app</span>
 					</a>
 				{/each}
 			</div>
+			<button
+				type="button"
+				class="carousel-arrow carousel-arrow-next"
+				aria-label="Next data layers"
+				onclick={() => scrollCarousel(1)}
+			>
+				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
+					<path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
+				</svg>
+			</button>
 		</div>
 	</section>
 
-	<!-- Tools / Platforms -->
 	<section class="section section-alt">
 		<div class="section-inner">
 			<div class="section-head">
-				<h2>Tools, Products and Platforms</h2>
-				<p>Applications that help diagnose, plan, and act in water landscapes.</p>
+				<h2>Digital Solutions</h2>
+				<p>
+					We translate our understanding of water and hydrology into tools that can be used in rural
+					and urban landscapes to understand and solve problems experienced on the ground.
+				</p>
 			</div>
 			<div class="platform-grid">
-				{#each platforms as item}
+				{#each digitalSolutions as item}
 					{#if item.href}
 						<a class="platform-card platform-card-live" href={item.href}>
-							<div class="platform-top">
-								<h3>{item.title}</h3>
-								<span class="badge badge-live">Available</span>
+							<div class="thumb thumb-card" aria-hidden="true">
+								<img src={thumbSrc(item.title)} alt="" loading="lazy" onerror={onThumbError} />
+								<span class="thumb-fallback" hidden></span>
 							</div>
-							<p>{item.description}</p>
-							<span class="platform-cta">Open app →</span>
+							<div class="platform-body">
+								<div class="platform-top">
+									<h3>{item.title}</h3>
+									<span class="badge badge-live">Available</span>
+								</div>
+								<p>{item.description}</p>
+								<span class="open-cta">Open app →</span>
+							</div>
 						</a>
 					{:else}
 						<div class="platform-card">
-							<div class="platform-top">
-								<h3>{item.title}</h3>
-								<span class="badge">Coming soon</span>
+							<div class="thumb thumb-card" aria-hidden="true">
+								<img src={thumbSrc(item.title)} alt="" loading="lazy" onerror={onThumbError} />
+								<span class="thumb-fallback" hidden></span>
 							</div>
-							<p>{item.description}</p>
+							<div class="platform-body">
+								<div class="platform-top">
+									<h3>{item.title}</h3>
+									<span class="badge">Coming soon</span>
+								</div>
+								<p>{item.description}</p>
+							</div>
 						</div>
 					{/if}
-				{/each}
-			</div>
-		</div>
-	</section>
-
-	<!-- AI Pipelines -->
-	<section class="section">
-		<div class="section-inner">
-			<div class="section-head">
-				<h2>AI Pipelines</h2>
-				<p>Models in development for canal maintenance and urban flood assessment.</p>
-			</div>
-			<div class="pipeline-grid">
-				{#each pipelines as pipe}
-					<article class="pipeline-card">
-						<span class="badge">Coming soon</span>
-						<h3>{pipe.title}</h3>
-						<p>{pipe.description}</p>
-					</article>
 				{/each}
 			</div>
 		</div>
@@ -228,27 +337,32 @@
 		padding: 0.9rem 0;
 	}
 
-	.brand {
+	.brand-link {
 		display: flex;
 		align-items: center;
-		gap: 0.55rem;
 		text-decoration: none;
 		color: inherit;
 	}
 
-	.brand-mark {
-		font-family: 'Josefin Sans', sans-serif;
-		font-size: 1.2rem;
-		font-weight: 700;
-		letter-spacing: -0.02em;
-		color: var(--ink);
+	.bar-nav {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		justify-content: flex-end;
+		gap: 0.35rem 0.85rem;
 	}
 
-	.brand-sub {
-		font-size: 0.72rem;
-		letter-spacing: 0.06em;
-		text-transform: uppercase;
-		color: var(--muted);
+	.bar-link {
+		padding: 0.45rem 0.35rem;
+		font-size: 0.9rem;
+		font-weight: 600;
+		color: var(--ink-soft);
+		text-decoration: none;
+		transition: color 160ms ease;
+	}
+
+	.bar-link:hover {
+		color: var(--accent);
 	}
 
 	.bar-cta {
@@ -266,10 +380,14 @@
 		background: var(--accent-deep);
 	}
 
+	/* Hero band for future bg image: ~1920×720 design canvas */
 	.hero {
 		position: relative;
 		overflow: hidden;
-		padding: 4.5rem 0 4rem;
+		display: flex;
+		align-items: center;
+		min-height: clamp(32rem, 70vh, 45rem);
+		padding: 5rem 0;
 		border-bottom: 1px solid var(--line);
 	}
 
@@ -287,22 +405,13 @@
 		position: relative;
 	}
 
-	.hero-kicker {
-		margin: 0 0 0.75rem;
-		font-size: 0.78rem;
-		font-weight: 600;
-		letter-spacing: 0.14em;
-		text-transform: uppercase;
-		color: var(--accent);
-	}
-
 	.hero-title {
 		margin: 0;
-		max-width: 14ch;
+		max-width: 16ch;
 		font-family: 'Josefin Sans', sans-serif;
-		font-size: clamp(2.4rem, 6vw, 4.2rem);
+		font-size: clamp(2.2rem, 5.5vw, 3.8rem);
 		font-weight: 700;
-		line-height: 1.05;
+		line-height: 1.08;
 		letter-spacing: -0.03em;
 		color: var(--ink);
 	}
@@ -313,10 +422,6 @@
 		font-size: 1.08rem;
 		line-height: 1.65;
 		color: var(--ink-soft);
-	}
-
-	.hero-lead-secondary {
-		margin-top: 0.85rem;
 	}
 
 	.section {
@@ -342,89 +447,198 @@
 
 	.section-head p {
 		margin: 0.55rem 0 0;
-		max-width: 40rem;
+		max-width: 44rem;
 		color: var(--muted);
 		line-height: 1.55;
 	}
 
-	.product-list {
-		display: grid;
-		gap: 0.75rem;
+	.thumb {
+		position: relative;
+		overflow: hidden;
+		background: var(--accent);
+		flex-shrink: 0;
 	}
 
-	.product-row {
+	.thumb img {
+		display: block;
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
+	}
+
+	.thumb-fallback {
+		display: block;
+		width: 100%;
+		height: 100%;
+		background: var(--accent);
+	}
+
+	.thumb-fallback[hidden] {
+		display: none;
+	}
+
+	.thumb-layer {
+		width: 100%;
+		aspect-ratio: 16 / 10;
+	}
+
+	.thumb-card {
+		width: 100%;
+		aspect-ratio: 16 / 9;
+	}
+
+	.carousel {
+		position: relative;
+		width: 100%;
+	}
+
+	.carousel-arrow {
+		position: absolute;
+		top: 38%;
+		z-index: 3;
+		translate: 0 -50%;
 		display: grid;
-		grid-template-columns: 1fr auto;
-		gap: 1.25rem;
-		align-items: center;
-		padding: 1.25rem 1.35rem;
+		place-items: center;
+		width: 2.75rem;
+		height: 2.75rem;
 		border: 1px solid var(--line);
-		border-radius: 1rem;
+		border-radius: 0;
+		background: color-mix(in srgb, var(--panel) 92%, transparent);
+		color: var(--ink);
+		cursor: pointer;
+		box-shadow: 0 2px 12px color-mix(in srgb, #00296b 16%, transparent);
+		transition:
+			background 160ms ease,
+			color 160ms ease;
+	}
+
+	.carousel-arrow-prev {
+		left: 0.5rem;
+	}
+
+	.carousel-arrow-next {
+		right: 0.5rem;
+	}
+
+	.carousel-arrow:hover {
+		background: var(--accent);
+		color: white;
+		border-color: var(--accent);
+	}
+
+	.carousel-arrow svg {
+		width: 1.25rem;
+		height: 1.25rem;
+	}
+
+	.section-layers .product-list {
+		display: flex;
+		gap: 0.75rem;
+		width: 100%;
+		margin: 0;
+		padding: 0;
+		overflow-x: auto;
+		scroll-snap-type: x mandatory;
+		scroll-behavior: smooth;
+		scrollbar-width: none;
+		-ms-overflow-style: none;
+	}
+
+	.section-layers .product-list::-webkit-scrollbar {
+		display: none;
+	}
+
+	/* ~3 cards + slight peek of the 4th under the arrow */
+	.layer-card {
+		display: flex;
+		flex: 0 0 calc((100% - 2.25rem) / 3.28);
+		flex-direction: column;
+		min-width: 0;
+		max-width: calc((100% - 2.25rem) / 3.28);
+		border: 1px solid var(--line);
+		border-radius: 0;
 		background: var(--panel);
+		overflow: hidden;
+		scroll-snap-align: start;
 		text-decoration: none;
 		color: inherit;
-		transition:
-			border-color 160ms ease,
-			transform 160ms ease;
+		transition: border-color 160ms ease;
 	}
 
-	.product-row:hover {
+	.layer-card:hover {
 		border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
-		transform: translateY(-1px);
 	}
 
-	.product-row h3 {
-		margin: 0 0 0.35rem;
+	.layer-body {
+		display: flex;
+		flex: 1;
+		flex-direction: column;
+		gap: 0.55rem;
+		padding: 1rem 1.05rem 1.15rem;
+	}
+
+	.layer-body h3 {
+		margin: 0;
 		font-family: 'Josefin Sans', sans-serif;
 		font-size: 1.05rem;
 		font-weight: 600;
+		letter-spacing: -0.01em;
 	}
 
-	.product-row p,
-	.platform-card p,
-	.pipeline-card p {
+	.layer-body p,
+	.platform-card p {
 		margin: 0;
 		color: var(--muted);
-		font-size: 0.95rem;
-		line-height: 1.55;
+		font-size: 0.88rem;
+		line-height: 1.5;
 	}
 
-	.product-link {
-		font-size: 0.85rem;
+	.explore-cta,
+	.open-cta {
+		margin-top: auto;
+		padding-top: 0.35rem;
+		font-size: 0.9rem;
 		font-weight: 600;
 		color: var(--accent);
-		white-space: nowrap;
 	}
 
-	.platform-grid,
-	.pipeline-grid {
+	.explore-cta {
+		font-size: 0.85rem;
+	}
+
+	.platform-grid {
 		display: grid;
 		gap: 1rem;
-		grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+		grid-template-columns: repeat(2, minmax(0, 1fr));
 	}
 
-	.platform-card,
-	.pipeline-card {
+	.platform-card {
 		display: flex;
 		flex-direction: column;
-		gap: 0.85rem;
-		padding: 1.4rem;
+		gap: 0;
+		padding: 0;
 		border: 1px solid var(--line);
-		border-radius: 1.1rem;
+		border-radius: 0;
 		background: var(--panel);
+		overflow: hidden;
 		text-decoration: none;
 		color: inherit;
 	}
 
+	.platform-body {
+		display: flex;
+		flex: 1;
+		flex-direction: column;
+		gap: 0.7rem;
+		padding: 0.9rem 1rem 1.1rem;
+	}
+
 	.platform-card-live {
-		transition:
-			border-color 160ms ease,
-			transform 160ms ease;
+		transition: border-color 160ms ease;
 	}
 
 	.platform-card-live:hover {
 		border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
-		transform: translateY(-2px);
 	}
 
 	.platform-top {
@@ -434,8 +648,7 @@
 		gap: 0.75rem;
 	}
 
-	.platform-card h3,
-	.pipeline-card h3 {
+	.platform-card h3 {
 		margin: 0;
 		font-family: 'Josefin Sans', sans-serif;
 		font-size: 1.1rem;
@@ -445,8 +658,8 @@
 
 	.badge {
 		flex-shrink: 0;
-		border-radius: 999px;
-		padding: 0.25rem 0.6rem;
+		border-radius: 0;
+		padding: 0.25rem 0.55rem;
 		font-size: 0.7rem;
 		font-weight: 600;
 		letter-spacing: 0.04em;
@@ -460,13 +673,6 @@
 		color: #00296b;
 		background: color-mix(in srgb, #1b75e0 18%, white);
 		border-color: color-mix(in srgb, #1b75e0 35%, white);
-	}
-
-	.platform-cta {
-		margin-top: auto;
-		font-size: 0.9rem;
-		font-weight: 600;
-		color: var(--accent);
 	}
 
 	.landing-foot {
@@ -493,14 +699,30 @@
 		color: var(--ink);
 	}
 
+	@media (max-width: 1100px) {
+		.layer-card {
+			flex-basis: calc((100% - 0.75rem) / 2.2);
+			max-width: calc((100% - 0.75rem) / 2.2);
+		}
+	}
+
 	@media (max-width: 720px) {
-		.product-row {
+		.layer-card {
+			flex-basis: 78%;
+			max-width: 78%;
+		}
+
+		.platform-grid {
 			grid-template-columns: 1fr;
-			gap: 0.75rem;
 		}
 
 		.hero {
-			padding: 3.25rem 0 2.75rem;
+			min-height: 28rem;
+			padding: 3.5rem 0;
+		}
+
+		.hero-title {
+			max-width: none;
 		}
 	}
 </style>
