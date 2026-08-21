@@ -1,5 +1,5 @@
 <script lang="ts">
-	import BrandAiMark from '$lib/components/BrandAiMark.svelte';
+	import LandingNav from '$lib/components/LandingNav.svelte';
 
 	const dataLayers = [
 		{
@@ -83,8 +83,11 @@
 	let carouselEl = $state<HTMLElement | null>(null);
 	let scrolling = false;
 
+	/** Bump when replacing files in static/landing_page_images/ so browsers refetch */
+	const THUMB_VERSION = '2026-08-21b';
+
 	function thumbSrc(title: string): string {
-		return `/landing_page_images/${encodeURIComponent(title)}.png`;
+		return `/landing_page_images/${encodeURIComponent(title)}.png?v=${THUMB_VERSION}`;
 	}
 
 	function onThumbError(e: Event) {
@@ -173,25 +176,7 @@
 </svelte:head>
 
 <div class="landing">
-	<header class="landing-bar">
-		<div class="landing-bar-inner">
-			<a href="/" class="brand-link" aria-label="AI @ WELL Labs home">
-				<BrandAiMark heightRem={2.4} maxWidthPx={260} />
-			</a>
-			<nav class="bar-nav" aria-label="Primary">
-				<a href="/about" class="bar-link">About</a>
-				<a href="/contact" class="bar-link">Contact Us</a>
-				<a
-					href="https://welllabs.org"
-					target="_blank"
-					rel="noopener noreferrer"
-					class="bar-cta"
-				>
-					WELL Labs Website
-				</a>
-			</nav>
-		</div>
-	</header>
+	<LandingNav />
 
 	<section class="hero">
 		<div class="hero-wash" aria-hidden="true"></div>
@@ -335,72 +320,11 @@
 		font-family: 'Montserrat', sans-serif;
 	}
 
-	.landing-bar {
-		position: sticky;
-		top: 0;
-		z-index: 20;
-		border-bottom: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
-		background: color-mix(in srgb, var(--paper) 88%, white);
-		backdrop-filter: blur(10px);
-	}
-
-	.landing-bar-inner,
 	.hero-inner,
 	.section-inner,
 	.landing-foot-inner {
-		width: min(1100px, calc(100% - 2.5rem));
+		width: min(1100px, calc(100% - 2rem));
 		margin-inline: auto;
-	}
-
-	.landing-bar-inner {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 1rem;
-		padding: 0.9rem 0;
-	}
-
-	.brand-link {
-		display: flex;
-		align-items: center;
-		text-decoration: none;
-		color: inherit;
-	}
-
-	.bar-nav {
-		display: flex;
-		flex-wrap: wrap;
-		align-items: center;
-		justify-content: flex-end;
-		gap: 0.35rem 0.85rem;
-	}
-
-	.bar-link {
-		padding: 0.45rem 0.35rem;
-		font-size: 0.9rem;
-		font-weight: 600;
-		color: var(--ink-soft);
-		text-decoration: none;
-		transition: color 160ms ease;
-	}
-
-	.bar-link:hover {
-		color: var(--accent);
-	}
-
-	.bar-cta {
-		border-radius: 999px;
-		background: var(--accent);
-		color: white;
-		padding: 0.55rem 1rem;
-		font-size: 0.85rem;
-		font-weight: 600;
-		text-decoration: none;
-		transition: background 160ms ease;
-	}
-
-	.bar-cta:hover {
-		background: var(--accent-deep);
 	}
 
 	/* Hero band for future bg image: ~1920×720 design canvas */
@@ -579,7 +503,7 @@
 		min-width: 0;
 		max-width: calc((100% - 2.25rem) / 3.28);
 		border: 1px solid var(--line);
-		border-radius: 0;
+		border-radius: 1rem;
 		background: var(--panel);
 		overflow: hidden;
 		scroll-snap-align: start;
@@ -647,7 +571,7 @@
 		gap: 0;
 		padding: 0;
 		border: 1px solid var(--line);
-		border-radius: 0;
+		border-radius: 1rem;
 		background: var(--panel);
 		overflow: hidden;
 		text-decoration: none;
@@ -739,22 +663,91 @@
 	}
 
 	@media (max-width: 720px) {
-		.layer-card {
-			flex-basis: 78%;
-			max-width: 78%;
-		}
-
-		.platform-grid {
-			grid-template-columns: 1fr;
-		}
-
 		.hero {
-			min-height: 28rem;
-			padding: 3.5rem 0;
+			min-height: auto;
+			padding: 2.75rem 0 2.5rem;
 		}
 
 		.hero-title {
 			max-width: none;
+			font-size: clamp(1.85rem, 8vw, 2.4rem);
+		}
+
+		.hero-lead {
+			margin-top: 1rem;
+			font-size: 0.98rem;
+		}
+
+		.section {
+			padding: 2.5rem 0;
+		}
+
+		.section-head {
+			margin-bottom: 1.25rem;
+		}
+
+		.platform-grid {
+			grid-template-columns: 1fr;
+			gap: 0.85rem;
+		}
+
+		.platform-top {
+			flex-wrap: wrap;
+		}
+
+		.platform-body {
+			padding: 0.85rem 0.9rem 1rem;
+		}
+
+		.layer-card {
+			flex-basis: 82%;
+			max-width: 82%;
+		}
+
+		.layer-body {
+			padding: 0.85rem 0.9rem 1rem;
+		}
+
+		.layer-body p,
+		.platform-card p {
+			font-size: 0.86rem;
+		}
+
+		.carousel-arrow {
+			width: 2.4rem;
+			height: 2.4rem;
+			top: 32%;
+		}
+
+		.carousel-arrow-prev {
+			left: 0.35rem;
+		}
+
+		.carousel-arrow-next {
+			right: 0.35rem;
+		}
+
+		.landing-foot {
+			padding: 1.25rem 0 1.75rem;
+		}
+
+		.landing-foot-inner {
+			flex-direction: column;
+			align-items: flex-start;
+			gap: 0.5rem;
+		}
+	}
+
+	@media (max-width: 420px) {
+		.hero-inner,
+		.section-inner,
+		.landing-foot-inner {
+			width: min(1100px, calc(100% - 1.25rem));
+		}
+
+		.layer-card {
+			flex-basis: 88%;
+			max-width: 88%;
 		}
 	}
 </style>
