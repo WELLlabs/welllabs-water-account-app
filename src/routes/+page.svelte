@@ -47,17 +47,35 @@
 			title: 'Wastewater Audit Tool',
 			description:
 				'To help Resident Welfare Associations that run decentralised sewage treatment plants (STPs) face and manage audits of their STPs. The tool also helps them evaluate upgrades and repairs.',
-			status: 'coming' as const,
-			href: null
+			status: 'live' as const,
+			href: 'https://ai.welllabs.org/dstp-tool'
 		},
 		{
 			title: 'Bengaluru Flood Reporting Tool',
 			description:
 				'We have built a tool to collect flooding data points across Bengaluru using this citizen engagement tool to better calibrate flood models.',
+			status: 'live' as const,
+			href: 'https://ai.welllabs.org/reportflood'
+		},
+		{
+			title: 'Canal Vegetation Identification',
+			description:
+				'We are developing an AI pipeline that will allow canal operators to feed drone data and identify vegetation along the chainage of the canal. This will be helpful in planning repair and maintenance of the canal.',
+			status: 'coming' as const,
+			href: null
+		},
+		{
+			title: 'Floodwater Depth',
+			description:
+				'We are developing an AI pipeline that can assess flooding images and deliver depth data based on various objects in the field of view. This can be used to generate flooding datasets in urban landscapes.',
 			status: 'coming' as const,
 			href: null
 		}
 	];
+
+	function isExternal(href: string): boolean {
+		return /^https?:\/\//i.test(href);
+	}
 
 	/** Triplicate for seamless endless scroll */
 	const carouselLayers = [...dataLayers, ...dataLayers, ...dataLayers];
@@ -186,6 +204,57 @@
 		</div>
 	</section>
 
+	<section class="section section-alt">
+		<div class="section-inner">
+			<div class="section-head">
+				<h2>Digital Solutions</h2>
+				<p>
+					We translate our understanding of water and hydrology into tools that can be used in rural
+					and urban landscapes to understand and solve problems experienced on the ground.
+				</p>
+			</div>
+			<div class="platform-grid">
+				{#each digitalSolutions as item}
+					{#if item.href}
+						<a
+							class="platform-card platform-card-live"
+							href={item.href}
+							target={isExternal(item.href) ? '_blank' : undefined}
+							rel={isExternal(item.href) ? 'noopener noreferrer' : undefined}
+						>
+							<div class="thumb thumb-card" aria-hidden="true">
+								<img src={thumbSrc(item.title)} alt="" loading="lazy" onerror={onThumbError} />
+								<span class="thumb-fallback" hidden></span>
+							</div>
+							<div class="platform-body">
+								<div class="platform-top">
+									<h3>{item.title}</h3>
+									<span class="badge badge-live">Available</span>
+								</div>
+								<p>{item.description}</p>
+								<span class="open-cta">Open app →</span>
+							</div>
+						</a>
+					{:else}
+						<div class="platform-card">
+							<div class="thumb thumb-card" aria-hidden="true">
+								<img src={thumbSrc(item.title)} alt="" loading="lazy" onerror={onThumbError} />
+								<span class="thumb-fallback" hidden></span>
+							</div>
+							<div class="platform-body">
+								<div class="platform-top">
+									<h3>{item.title}</h3>
+									<span class="badge">Coming soon</span>
+								</div>
+								<p>{item.description}</p>
+							</div>
+						</div>
+					{/if}
+				{/each}
+			</div>
+		</div>
+	</section>
+
 	<section class="section section-layers">
 		<div class="section-inner">
 			<div class="section-head">
@@ -236,52 +305,6 @@
 					<path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
 				</svg>
 			</button>
-		</div>
-	</section>
-
-	<section class="section section-alt">
-		<div class="section-inner">
-			<div class="section-head">
-				<h2>Digital Solutions</h2>
-				<p>
-					We translate our understanding of water and hydrology into tools that can be used in rural
-					and urban landscapes to understand and solve problems experienced on the ground.
-				</p>
-			</div>
-			<div class="platform-grid">
-				{#each digitalSolutions as item}
-					{#if item.href}
-						<a class="platform-card platform-card-live" href={item.href}>
-							<div class="thumb thumb-card" aria-hidden="true">
-								<img src={thumbSrc(item.title)} alt="" loading="lazy" onerror={onThumbError} />
-								<span class="thumb-fallback" hidden></span>
-							</div>
-							<div class="platform-body">
-								<div class="platform-top">
-									<h3>{item.title}</h3>
-									<span class="badge badge-live">Available</span>
-								</div>
-								<p>{item.description}</p>
-								<span class="open-cta">Open app →</span>
-							</div>
-						</a>
-					{:else}
-						<div class="platform-card">
-							<div class="thumb thumb-card" aria-hidden="true">
-								<img src={thumbSrc(item.title)} alt="" loading="lazy" onerror={onThumbError} />
-								<span class="thumb-fallback" hidden></span>
-							</div>
-							<div class="platform-body">
-								<div class="platform-top">
-									<h3>{item.title}</h3>
-									<span class="badge">Coming soon</span>
-								</div>
-								<p>{item.description}</p>
-							</div>
-						</div>
-					{/if}
-				{/each}
-			</div>
 		</div>
 	</section>
 
@@ -562,11 +585,17 @@
 		scroll-snap-align: start;
 		text-decoration: none;
 		color: inherit;
-		transition: border-color 160ms ease;
+		box-shadow: 0 1px 3px color-mix(in srgb, #00296b 8%, transparent);
+		transition:
+			border-color 160ms ease,
+			box-shadow 160ms ease,
+			transform 160ms ease;
 	}
 
 	.layer-card:hover {
 		border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+		box-shadow: 0 8px 22px color-mix(in srgb, #00296b 14%, transparent);
+		transform: translateY(-2px);
 	}
 
 	.layer-body {
@@ -623,6 +652,11 @@
 		overflow: hidden;
 		text-decoration: none;
 		color: inherit;
+		box-shadow: 0 1px 3px color-mix(in srgb, #00296b 8%, transparent);
+		transition:
+			border-color 160ms ease,
+			box-shadow 160ms ease,
+			transform 160ms ease;
 	}
 
 	.platform-body {
@@ -633,12 +667,10 @@
 		padding: 0.9rem 1rem 1.1rem;
 	}
 
-	.platform-card-live {
-		transition: border-color 160ms ease;
-	}
-
-	.platform-card-live:hover {
+	.platform-card:hover {
 		border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+		box-shadow: 0 8px 22px color-mix(in srgb, #00296b 14%, transparent);
+		transform: translateY(-2px);
 	}
 
 	.platform-top {
