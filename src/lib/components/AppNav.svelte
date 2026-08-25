@@ -20,7 +20,7 @@
 
 <nav class="border-b border-[color-mix(in_srgb,#00296b_12%,white)] bg-white">
 	<div class="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-4 px-6 py-3">
-		<BrandAiMark heightRem={2} maxWidthPx={180} />
+		<BrandAiMark heightRem={2} maxWidthPx={200} ariaLabel="WELL Labs AI — Home" />
 		<div class="flex flex-wrap gap-1">
 			{#each links as link}
 				<a

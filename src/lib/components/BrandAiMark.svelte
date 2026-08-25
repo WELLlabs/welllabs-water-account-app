@@ -20,8 +20,8 @@
 	*/
 	const aiFontRem = $derived(heightRem * (100 / 227));
 	const sparklePx = $derived(Math.max(12, Math.round(heightRem * 7)));
-	/* Room for sparkle + AI to the right of the logo (keeps whole mark clickable) */
-	const suffixPadRem = $derived(aiFontRem * 2.4);
+	/* Room for sparkle + “AI” to the right of the logo (keeps whole mark clickable) */
+	const suffixPadRem = $derived(aiFontRem * 3.4);
 </script>
 
 <a

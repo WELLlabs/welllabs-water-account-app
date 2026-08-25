@@ -31,7 +31,7 @@
 <header class="bar">
 	<div class="bar-inner">
 		<div class="brand-wrap">
-			<BrandAiMark heightRem={2.15} maxWidthPx={200} ariaLabel="AI @ WELL Labs — Home" />
+			<BrandAiMark heightRem={2.15} maxWidthPx={220} ariaLabel="WELL Labs AI — Home" />
 		</div>
 
 		<button
@@ -104,13 +104,8 @@
 	}
 
 	.brand-wrap {
-		min-width: 0;
-		max-width: min(200px, 58vw);
-		overflow: hidden;
-	}
-
-	.brand-wrap :global(.brand-ai-mark) {
-		max-width: 100%;
+		flex-shrink: 0;
+		overflow: visible;
 	}
 
 	.menu-toggle {
