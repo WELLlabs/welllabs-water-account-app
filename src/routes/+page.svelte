@@ -40,8 +40,8 @@
 			title: 'Water Security Toolbox',
 			description:
 				'The Water Security Toolbox makes hydrology accessible for field-level water security programmes across rural India. It combines GIS layers with local intelligence to power three tools that scientifically diagnose problems in a landscape, design relevant solutions, and assess the impact of interventions through continuous monitoring.',
-			status: 'coming' as const,
-			href: null
+			status: 'live' as const,
+			href: '/wst'
 		},
 		{
 			title: 'Wastewater Audit Tool',
