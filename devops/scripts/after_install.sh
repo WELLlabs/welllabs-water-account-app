@@ -52,36 +52,51 @@ echo "  → api/main.py confirmed."
 # Ensure api is importable as a package
 touch "${RELEASE_DIR}/api/__init__.py"
 
-# ── 3. Install / update Nginx configuration (conf.d — legacy path) ─
-echo "[3/7] Installing Nginx configuration to ${NGINX_CONF}..."
+# # ── 3. Install / update Nginx configuration (conf.d — legacy path) ─
+# ──────────────────────────────────────────────────────────────
+# Nginx configuration
+# First deployment → install configuration
+# Re-deployments → preserve existing configuration
+# ──────────────────────────────────────────────────────────────
 
-# Drop any sites-* copy from a prior failed deploy to avoid duplicate zones
-rm -f /etc/nginx/sites-enabled/welllabs /etc/nginx/sites-available/welllabs
+if [ -f "${NGINX_CONF}" ] && nginx -t 2>/dev/null; then
+    echo "✓ Existing Nginx configuration is valid."
+    echo "✓ Preserving existing configuration — not overwriting."
+else
+    echo "ℹ Nginx configuration missing or invalid."
+    echo "ℹ Installing Nginx configuration for first-time setup..."
 
-# Backup live conf before overwrite
-if [ -f "${NGINX_CONF}" ]; then
-  cp "${NGINX_CONF}" "${NGINX_CONF}.bak.$(date +%Y%m%d_%H%M%S)"
-  echo "  → Backed up existing ${NGINX_CONF}"
+    cp "${RELEASE_DIR}/devops/nginx/welllabs.conf" "${NGINX_CONF}"
 fi
 
-cp "${RELEASE_DIR}/devops/nginx/welllabs.conf" "${NGINX_CONF}"
-# http-context body size (survives even if a server block omits the directive)
-cp "${RELEASE_DIR}/devops/nginx/00-upload-limits.conf" "${NGINX_UPLOAD_LIMITS}"
-rm -f /etc/nginx/sites-enabled/default
+# Install upload limits only if it doesn't already exist
+if [ ! -f "${NGINX_UPLOAD_LIMITS}" ]; then
+    echo "ℹ Installing upload limits configuration..."
 
+    cp "${RELEASE_DIR}/devops/nginx/00-upload-limits.conf" \
+       "${NGINX_UPLOAD_LIMITS}"
+else
+    echo "✓ Existing upload limits configuration preserved."
+fi
+
+# Always validate final Nginx configuration
 if ! nginx -t; then
-  echo "ERROR: Nginx config invalid — restoring previous conf if backup exists..."
-  LATEST_BAK=$(ls -1t "${NGINX_CONF}".bak.* 2>/dev/null | head -1 || true)
-  if [ -n "${LATEST_BAK}" ] && [ -f "${LATEST_BAK}" ]; then
-    cp "${LATEST_BAK}" "${NGINX_CONF}"
-    echo "  → Restored ${LATEST_BAK}"
-  fi
-  rm -f "${NGINX_UPLOAD_LIMITS}"
-  exit 1
+    echo "ERROR: Nginx configuration test failed."
+    exit 1
 fi
 
-systemctl reload nginx
-echo "  → Nginx config installed and reloaded (client_max_body_size 512m, /fwa-api → :8010)."
+echo "✓ Nginx configuration is valid."
+
+# Reload only — never overwrite existing configuration
+systemctl enable nginx
+
+if systemctl is-active --quiet nginx; then
+    systemctl reload nginx
+else
+    systemctl start nginx
+fi
+
+echo "✓ Nginx is running."
 
 # ── 4. Python runtime + shared venv for FastAPI ──────────────
 echo "[4/7] Ensuring Python venv and API dependencies..."
