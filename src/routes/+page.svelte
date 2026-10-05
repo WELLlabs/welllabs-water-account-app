@@ -179,13 +179,22 @@
 	<LandingNav />
 
 	<section class="hero">
-		<div class="hero-wash" aria-hidden="true"></div>
 		<div class="hero-inner">
-			<h1 class="hero-title">Data Layers. Digital Solutions.</h1>
-			<p class="hero-lead">
-				Open data and digital tools from WELL Labs - built so those closest to the problem can act
-				on it
-			</p>
+			<div class="hero-copy">
+				<h1 class="hero-title">Data Layers. Digital Solutions.</h1>
+				<p class="hero-lead">
+					Open data and digital tools from WELL Labs - built so those closest to the problem can
+					act on it
+				</p>
+			</div>
+			<img
+				class="hero-art"
+				src="/landing_page_images/difu-illustration.webp"
+				alt="Illustration of layered maps, a well, crop data and a community meeting across rural and urban landscapes"
+				width="3944"
+				height="2368"
+				fetchpriority="high"
+			/>
 		</div>
 	</section>
 
@@ -327,37 +336,52 @@
 		margin-inline: auto;
 	}
 
-	/* Hero band for future bg image: ~1920×720 design canvas */
+	/* Background matches the flat blue of difu-illustration.webp */
 	.hero {
 		position: relative;
 		overflow: hidden;
 		display: flex;
 		align-items: center;
-		min-height: clamp(32rem, 70vh, 45rem);
-		padding: 5rem 0;
+		min-height: clamp(32rem, 72vh, 48rem);
+		padding: 2.5rem 0;
+		background: #7fc3fe;
 		border-bottom: 1px solid var(--line);
 	}
 
-	.hero-wash {
-		position: absolute;
-		inset: 0;
-		background:
-			radial-gradient(ellipse 70% 80% at 85% 10%, color-mix(in srgb, #1b75e0 28%, white) 0%, transparent 55%),
-			radial-gradient(ellipse 55% 60% at 5% 90%, color-mix(in srgb, #00296b 12%, white) 0%, transparent 50%),
-			linear-gradient(180deg, #eaf1fb 0%, var(--paper) 100%);
-		pointer-events: none;
+	.hero .hero-inner {
+		position: relative;
+		width: min(1600px, calc(100% - 2rem));
+		display: grid;
+		grid-template-columns: minmax(0, 0.7fr) minmax(0, 1.3fr);
+		align-items: center;
+		gap: 2rem;
 	}
 
-	.hero-inner {
-		position: relative;
+	.hero-copy {
+		padding-left: clamp(1rem, 3vw, 3rem);
+	}
+
+	.hero-art {
+		display: block;
+		width: 100%;
+		height: auto;
+		/* Feather edges so webp compression noise never shows a seam against the bg */
+		-webkit-mask-image:
+			linear-gradient(to right, transparent, #000 5%, #000 95%, transparent),
+			linear-gradient(to bottom, transparent, #000 5%, #000 95%, transparent);
+		-webkit-mask-composite: source-in;
+		mask-image:
+			linear-gradient(to right, transparent, #000 5%, #000 95%, transparent),
+			linear-gradient(to bottom, transparent, #000 5%, #000 95%, transparent);
+		mask-composite: intersect;
 	}
 
 	.hero-title {
 		margin: 0;
 		max-width: 16ch;
 		font-family: 'Josefin Sans', sans-serif;
-		font-size: clamp(2.2rem, 5.5vw, 3.8rem);
-		font-weight: 700;
+		font-size: clamp(2rem, 3.6vw, 3rem);
+		font-weight: 600;
 		line-height: 1.08;
 		letter-spacing: -0.03em;
 		color: var(--ink);
@@ -368,7 +392,18 @@
 		max-width: 42rem;
 		font-size: 1.08rem;
 		line-height: 1.65;
-		color: var(--ink-soft);
+		color: var(--accent-deep);
+	}
+
+	@media (max-width: 900px) {
+		.hero .hero-inner {
+			grid-template-columns: 1fr;
+			gap: 1.25rem;
+		}
+
+		.hero-copy {
+			padding-inline: 1.25rem;
+		}
 	}
 
 	.section {
@@ -663,9 +698,18 @@
 	}
 
 	@media (max-width: 720px) {
+		.section-inner,
+		.landing-foot-inner {
+			width: calc(100% - 3.5rem);
+		}
+
+		.hero .hero-copy {
+			padding-inline: 0.75rem;
+		}
+
 		.hero {
 			min-height: auto;
-			padding: 2.75rem 0 2.5rem;
+			padding: 2.25rem 0 1.5rem;
 		}
 
 		.hero-title {
@@ -739,12 +783,6 @@
 	}
 
 	@media (max-width: 420px) {
-		.hero-inner,
-		.section-inner,
-		.landing-foot-inner {
-			width: min(1100px, calc(100% - 1.25rem));
-		}
-
 		.layer-card {
 			flex-basis: 88%;
 			max-width: 88%;
