@@ -13,6 +13,9 @@ RELEASES_DIR="${APP_BASE}/releases"
 PACKAGE_DIR="${APP_BASE}/package"
 CURRENT_LINK="${APP_BASE}/current"
 API_VENV="${APP_BASE}/api-venv"
+API_ENV_FILE="${APP_BASE}/api.env"
+APP_SECRET_ID="${WELLLABS_SECRET_ID:-well-labs-water-accounting-product/dev/app-config}"
+AWS_REGION="${AWS_REGION:-ap-south-1}"
 # Production has historically used conf.d — keep updating that path only
 NGINX_CONF="/etc/nginx/conf.d/welllabs.conf"
 NGINX_UPLOAD_LIMITS="/etc/nginx/conf.d/00-upload-limits.conf"
@@ -114,6 +117,36 @@ fi
 "${API_VENV}/bin/pip" install -r "${RELEASE_DIR}/api/requirements.txt" -q
 chown -R ubuntu:ubuntu "${API_VENV}"
 echo "  → API dependencies installed."
+
+# ── 4b. Generate API env file from AWS Secrets Manager ───────
+# Uses the EC2 instance role; the secret is a flat JSON object of KEY: value
+echo "[4b/7] Generating ${API_ENV_FILE} from ${APP_SECRET_ID}..."
+if (umask 077 && "${API_VENV}/bin/python" - "${APP_SECRET_ID}" "${AWS_REGION}" > "${API_ENV_FILE}.tmp" <<'PY'
+import json, sys
+import boto3
+
+secret_id, region = sys.argv[1], sys.argv[2]
+values = json.loads(
+    boto3.client("secretsmanager", region_name=region).get_secret_value(SecretId=secret_id)["SecretString"]
+)
+for key, value in values.items():
+    escaped = str(value).replace("\\", "\\\\").replace('"', '\\"')
+    print(f'{key}="{escaped}"')
+PY
+); then
+  mv "${API_ENV_FILE}.tmp" "${API_ENV_FILE}"
+  chown root:root "${API_ENV_FILE}"
+  chmod 600 "${API_ENV_FILE}"
+  echo "  → $(wc -l < "${API_ENV_FILE}") variable(s) written."
+else
+  rm -f "${API_ENV_FILE}.tmp"
+  if [ -f "${API_ENV_FILE}" ]; then
+    echo "WARNING: could not read ${APP_SECRET_ID}; keeping the existing ${API_ENV_FILE}."
+  else
+    echo "ERROR: could not read ${APP_SECRET_ID} and no ${API_ENV_FILE} exists."
+    exit 1
+  fi
+fi
 
 # ── 5. Install systemd unit for FastAPI ──────────────────────
 echo "[5/7] Installing systemd unit welllabs-api.service..."
