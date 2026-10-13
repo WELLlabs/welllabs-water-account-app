@@ -10,7 +10,7 @@ export const SKIP_EXPORT_KEYS = new Set(['waterSchedule', 'geom', 'geometry']);
 export function waterExportBaseName(sourceFileName: string | null): string {
 	if (!sourceFileName) return 'farm_water_export';
 	return sourceFileName
-		.replace(/\.(gpkg|zip)$/i, '')
+		.replace(/\.(gpkg|zip|geojson|json|shp)$/i, '')
 		.replace(/\/\s*\(.+\)$/, '')
 		.replace(/[^a-zA-Z0-9._-]+/g, '_')
 		.replace(/_+$/, '') + '_water';

@@ -13,6 +13,9 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 
+from .agri import router as agri_router
+from .hydro import router as hydro_router
+from .layers import router as layers_router
 from .qgz_builder import build_qgz
 
 # Chunked uploads land here (each chunk stays under nginx's default 1m limit)
@@ -28,6 +31,18 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(agri_router)
+app.include_router(hydro_router)
+app.include_router(layers_router)
+
+
+@app.post("/fwa-api/client-error")
+async def client_error(request: Request):
+    """Browser errors from T-Lab, echoed to the server log for debugging."""
+    body = (await request.body())[:4000].decode("utf-8", "replace")
+    print(f"[client-error] {request.headers.get('user-agent', '')[:160]}\n{body}", flush=True)
+    return Response(status_code=204)
 
 
 @app.get("/fwa-api/health")

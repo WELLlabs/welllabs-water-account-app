@@ -7,7 +7,8 @@
 		{ href: '/fwa/create', label: 'Form Creator', exact: false },
 		{ href: '/fwa/visualize', label: 'Visualization', exact: false },
 		{ href: '/fwa/calculate', label: 'Crop Calc', exact: false },
-		{ href: '/fwa/supply', label: 'Supply', exact: false }
+		{ href: '/fwa/supply', label: 'Supply', exact: false },
+		{ href: '/fwa/tlab', label: 'T-Lab', exact: false }
 	];
 
 	function isActive(href: string, exact: boolean): boolean {

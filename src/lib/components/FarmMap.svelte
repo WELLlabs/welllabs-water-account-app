@@ -28,6 +28,10 @@
 		selectedSubGroup: string | null;
 		onGroupSelect: (key: string | null) => void;
 		onSubGroupSelect: (key: string | null) => void;
+		/** Draw plots on a canvas; needed for regions with thousands of plots */
+		preferCanvas?: boolean;
+		/** Outline drawn under the plots (e.g. an uploaded region boundary) */
+		boundary?: GeoJSON.FeatureCollection | null;
 	}
 
 	let {
@@ -40,13 +44,17 @@
 		selectedGroup,
 		selectedSubGroup,
 		onGroupSelect,
-		onSubGroupSelect
+		onSubGroupSelect,
+		preferCanvas = false,
+		boundary = null
 	}: Props = $props();
 
 	let mapContainer: HTMLDivElement;
 	let map = $state<import('leaflet').Map | null>(null);
 	let leafletModule = $state<typeof import('leaflet') | null>(null);
 	let geoJsonLayer: import('leaflet').GeoJSON | null = null;
+	let boundaryLayer: import('leaflet').GeoJSON | null = null;
+	let resizeObserver: ResizeObserver | null = null;
 
 	/** Individual plots — yellow (stroke matches fill) */
 	const plotStyle = {
@@ -181,13 +189,16 @@
 
 	onMount(async () => {
 		leafletModule = await import('leaflet');
-		map = leafletModule.map(mapContainer).setView([16.3, 76.77], 14);
+		map = leafletModule.map(mapContainer, { preferCanvas }).setView([16.3, 76.77], 14);
+		const created = map;
+		resizeObserver = new ResizeObserver(() => created.invalidateSize());
+		resizeObserver.observe(mapContainer);
 
 		leafletModule
 			.tileLayer(
 				'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
 				{
-					maxZoom: 19,
+				maxZoom: 19,
 					attribution:
 						'Tiles © Esri — Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community'
 				}
@@ -241,7 +252,7 @@
 								onFeatureSelect(null);
 							}
 						} else {
-							onFeatureSelect(feature);
+						onFeatureSelect(feature);
 							onGroupSelect(null);
 							onSubGroupSelect(null);
 						}
@@ -267,7 +278,22 @@
 		geoJsonLayer.setStyle((feature) => featureStyle(feature));
 	});
 
+	$effect(() => {
+		if (!map || !leafletModule) return;
+		boundaryLayer?.remove();
+		boundaryLayer = null;
+		if (!boundary) return;
+		boundaryLayer = leafletModule
+			.geoJSON(boundary, {
+				interactive: false,
+				style: { color: '#ffffff', weight: 2, dashArray: '6 4', fill: false, opacity: 0.9 }
+			})
+			.addTo(map);
+		boundaryLayer.bringToBack();
+	});
+
 	onDestroy(() => {
+		resizeObserver?.disconnect();
 		map?.remove();
 	});
 

@@ -10,6 +10,9 @@ User=ubuntu
 Group=ubuntu
 WorkingDirectory=/opt/welllabs/current
 Environment=PATH=/opt/welllabs/api-venv/bin:/usr/local/bin:/usr/bin
+# Secrets: AGRI_API_KEY, plus AWS_S3_BUCKET_NAME / AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY /
+# AWS_DEFAULT_REGION and TLAB_BOUNDARY_KEY / TLAB_CANALS_KEY / TLAB_WATER_KEY for the T-Lab layers; "-" keeps the service starting if the file is absent
+EnvironmentFile=-/opt/welllabs/api.env
 ExecStart=/opt/welllabs/api-venv/bin/uvicorn api.main:app --host 127.0.0.1 --port 8010 --workers 1
 Restart=on-failure
 RestartSec=5

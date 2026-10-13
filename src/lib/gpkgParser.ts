@@ -169,6 +169,49 @@ function buildWaterSchedule(
 	return calculateWaterScheduleBySeason(crop, fallbackSeason as CropSeason, budget, acres);
 }
 
+function readFeatures(
+	featureDao: Awaited<ReturnType<typeof openFeatureDao>>['featureDao']
+): GeoJSON.Feature[] {
+	const srs = featureDao.srs;
+	const rawFeatures: GeoJSON.Feature[] = [];
+
+	for (const row of featureDao.queryForEach()) {
+		if (!row) continue;
+
+		const featureRow = featureDao.getRow(row);
+		const geoJsonFeature = GeoPackage.parseFeatureRowIntoGeoJSON(featureRow, srs);
+
+		if (!geoJsonFeature.geometry) continue;
+
+		rawFeatures.push({
+			type: 'Feature',
+			id: geoJsonFeature.id ?? featureRow.id,
+			geometry: geoJsonFeature.geometry as GeoJSON.Geometry,
+			properties: (geoJsonFeature.properties ?? {}) as Record<string, unknown>
+		});
+	}
+
+	if (rawFeatures.length === 0) {
+		throw new Error('No features could be read from the GeoPackage.');
+	}
+	return rawFeatures;
+}
+
+/** First feature table of a GeoPackage as WGS84 GeoJSON. */
+export async function readGpkgFeatureCollection(
+	file: ArrayBuffer
+): Promise<{ tableName: string; featureCollection: GeoJSON.FeatureCollection }> {
+	const { geoPackage, featureDao } = await openFeatureDao(file);
+	try {
+		return {
+			tableName: geoPackage.getFeatureTables()[0],
+			featureCollection: { type: 'FeatureCollection', features: readFeatures(featureDao) }
+		};
+	} finally {
+		geoPackage.close();
+	}
+}
+
 export async function parseGpkgFile(
 	file: ArrayBuffer,
 	budgetCsv: string,
@@ -178,30 +221,7 @@ export async function parseGpkgFile(
 
 	try {
 		validateParseOptions(featureDao.columns, options);
-
-		const srs = featureDao.srs;
-		const rawFeatures: GeoJSON.Feature[] = [];
-
-		for (const row of featureDao.queryForEach()) {
-			if (!row) continue;
-
-			const featureRow = featureDao.getRow(row);
-			const geoJsonFeature = GeoPackage.parseFeatureRowIntoGeoJSON(featureRow, srs);
-
-			if (!geoJsonFeature.geometry) continue;
-
-			rawFeatures.push({
-				type: 'Feature',
-				id: geoJsonFeature.id ?? featureRow.id,
-				geometry: geoJsonFeature.geometry as GeoJSON.Geometry,
-				properties: (geoJsonFeature.properties ?? {}) as Record<string, unknown>
-			});
-		}
-
-		if (rawFeatures.length === 0) {
-			throw new Error('No features could be read from the GeoPackage.');
-		}
-
+		const rawFeatures = readFeatures(featureDao);
 		const tableName = geoPackage.getFeatureTables()[0];
 		return enrichFeatureCollection(
 			{ type: 'FeatureCollection', features: rawFeatures },

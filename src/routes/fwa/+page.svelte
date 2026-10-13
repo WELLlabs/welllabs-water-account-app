@@ -112,5 +112,31 @@
 				>Open supply calculator →</span
 			>
 		</a>
+
+		<a
+			href="/fwa/tlab"
+			class="group rounded-2xl border border-slate-200 bg-white p-8 shadow-sm transition-shadow hover:shadow-md"
+		>
+			<div
+				class="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-lime-100 text-lime-700 group-hover:bg-lime-600 group-hover:text-white"
+			>
+				<svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+					<path
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						stroke-width="2"
+						d="M4 5h16v14H4zM4 12h16M12 5v14"
+					/>
+				</svg>
+			</div>
+			<h2 class="mb-2 text-xl font-semibold text-slate-900">T-Lab · Raichur</h2>
+			<p class="mb-4 text-sm leading-relaxed text-slate-500">
+				Pick a grid cell in Raichur district to load farm plots, dug wells, farm ponds, water bodies,
+				trees and field-level crop history live from Google's Agricultural Understanding API.
+			</p>
+			<span class="text-sm font-semibold text-lime-700 group-hover:text-lime-800"
+				>Open T-Lab →</span
+			>
+		</a>
 	</div>
 </main>
