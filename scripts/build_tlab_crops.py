@@ -34,7 +34,6 @@ import re
 import sys
 import threading
 import time
-import unicodedata
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -46,6 +45,9 @@ from dotenv import load_dotenv
 from shapely.geometry import Polygon, mapping
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+from api.crop_names import crop_en, parse_extent  # noqa: E402
+
 load_dotenv(ROOT / ".env")
 
 BUCKET = os.environ.get("TLAB_LAYERS_BUCKET") or os.environ.get("AWS_S3_BUCKET_NAME")
@@ -61,233 +63,7 @@ SEASON_KINDS = [("", "Kharif"), ("_Rabi", "Rabi"), ("_Summer", "Summer")]
 CELL_LEVEL = 13
 WORKERS = 8
 NAME_MATCH_MIN = 0.6
-HA_PER_ACRE = 0.40468564224
 UA = {"User-Agent": "Mozilla/5.0 (WELL Labs T-Lab crop survey summary)"}
-
-# Crop survey names (Kannada, variety suffix removed) -> English. Unlisted names stay in Kannada.
-CROP_EN = {
-    "ಹತ್ತಿ": "Cotton",
-    "ಭತ್ತ": "Paddy",
-    "ಒಣ ಮೆಣಸಿನಕಾಯಿ": "Chilli (dry)",
-    "ಮೆಣಸಿನಕಾಯಿ": "Chilli",
-    "ಹಸಿ ಮೆಣಸಿನಕಾಯಿ": "Chilli (green)",
-    "ತೊಗರಿ": "Red gram (tur)",
-    "ಜೋಳ": "Jowar (sorghum)",
-    "ಸಜ್ಜೆ": "Bajra (pearl millet)",
-    "ಮೆಕ್ಕೆಜೋಳ": "Maize",
-    "ಮುಸುಕಿನ ಜೋಳ": "Maize",
-    "ಸೂರ್ಯಕಾಂತಿ": "Sunflower",
-    "ಶೇಂಗಾ": "Groundnut",
-    "ನೆಲಗಡಲೆ": "Groundnut",
-    "ಕಡಲೆ": "Bengal gram (chana)",
-    "ಹೆಸರು": "Green gram (moong)",
-    "ಉದ್ದು": "Black gram (urad)",
-    "ಅಲಸಂದೆ": "Cowpea",
-    "ಹುರುಳಿ": "Horse gram",
-    "ಅವರೆ": "Field bean (avare)",
-    "ಊದಲು": "Barnyard millet",
-    "ಹುಣಸೆ": "Tamarind",
-    "ಬೋರೆ": "Ber",
-    "ಬಾರೆ": "Ber",
-    "ಬಿದಿರು": "Trees (timber)",
-    "ರಕ್ತ ಚಂದನ": "Trees (timber)",
-    "ನವಣೆ": "Foxtail millet",
-    "ರಾಗಿ": "Ragi (finger millet)",
-    "ಗೋಧಿ": "Wheat",
-    "ಕುಸುಬೆ": "Safflower",
-    "ಎಳ್ಳು": "Sesame",
-    "ಕಬ್ಬು": "Sugarcane",
-    "ಈರುಳ್ಳಿ": "Onion",
-    "ಟೊಮ್ಯಾಟೊ": "Tomato",
-    "ಬಾಳೆ": "Banana",
-    "ಮಾವು": "Mango",
-    "ದಾಳಿಂಬೆ": "Pomegranate",
-    "ಪೇರಲ": "Guava",
-    "ಸಪೋಟ": "Sapota",
-    "ತೆಂಗು": "Coconut",
-    "ನೀಲಗಿರಿ": "Eucalyptus",
-    "ಪಾಳು": "Fallow",
-    "ಬೀಳು": "Fallow",
-    "ಪಡ": "Fallow",
-    "ಕೃಷಿಯೇತರ": "Non-agricultural",
-    "ಕಟಾವಾದ ಪ್ರದೇಶ": "Harvested",
-    "?": "Not recorded",
-    "ಜೋಳ ಅಧಿಕ ಇಳುವರಿ": "Jowar (sorghum)",
-    "ಮುಸುಕಿನಜೋಳ": "Maize",
-    "ಗೋವಿನ ಜೋಳ": "Maize",
-    "ಸಿಹಿ ಮೆಕ್ಕೆಜೋಳ": "Maize",
-    "ಉಳ್ಳಾಗಡ್ಡಿ": "Onion",
-    "ಕೂಳೆ ಕಬ್ಬು": "Sugarcane",
-    "ಹುರಳಿ": "Horse gram",
-    "ಸೊಯಾಬಿನ್": "Soybean",
-    "ಗುರೆಳ್ಳು": "Niger seed",
-    "ಹುಚ್ಚೆಳ್ಳು": "Niger seed",
-    "ಹಿಪ್ಪುನೇರಳೆ": "Mulberry",
-    "ರೇಷ್ಮೆಗಿಡ": "Mulberry",
-    "ರೇಷ್ಮೆ ಹಣ್ಣು": "Mulberry",
-    "ಮೆಕ್ಕೆಜೋಳದ ದಂಟು": "Fodder",
-    "ಮೇವಿನಜೋಳ": "Fodder",
-    "ಹಸಿರು ಮೇವು": "Fodder",
-    "ಟೊಮೆಟೊ": "Tomato",
-    "ಬದನೇಕಾಯಿ": "Vegetables",
-    "ತರಕಾರಿ": "Vegetables",
-    "ಚೌವಳಿ ಕಾಯಿ": "Vegetables",
-    "ಗೋರಿಕಾಯಿ": "Vegetables",
-    "ತೊಂಡೆಕಾಯಿ": "Vegetables",
-    "ಹುರುಳಿಕಾಯಿ": "Vegetables",
-    "ಸೌತೆಕಾಯಿ": "Vegetables",
-    "ಬೆಂಡೆಕಾಯಿ": "Vegetables",
-    "ಹಾಗಲಕಾಯಿ": "Vegetables",
-    "ಹಿರೇಕಾಯಿ": "Vegetables",
-    "ಹೂ ಕೋಸು": "Vegetables",
-    "ಕುಂಬಳಕಾಯಿ": "Vegetables",
-    "ಸೋರೆಕಾಯಿ": "Vegetables",
-    "ನುಗ್ಗೆಕಾಯಿ": "Vegetables",
-    "ಪುಂಡಿ ಸೊಪ್ಪು": "Leafy greens & herbs",
-    "ಪಾಲಕ್": "Leafy greens & herbs",
-    "ಪುದಿನ": "Leafy greens & herbs",
-    "ಮೆಂತ್ಯ ಸೊಪ್ಪು": "Leafy greens & herbs",
-    "ಕೊತ್ತಂಬರಿ": "Leafy greens & herbs",
-    "ಕೊತಂಬರಿ ಸೊಪ್ಪು": "Leafy greens & herbs",
-    "ಹವೀಜ": "Leafy greens & herbs",
-    "ಕರಿಬೇವು": "Leafy greens & herbs",
-    "ಪಪಾಯ": "Fruits",
-    "ಪರಂಗಿ": "Fruits",
-    "ಅನಾನಸ್": "Fruits",
-    "ನಿಂಬೆ": "Fruits",
-    "ಡ್ರ್ಯಾಗನ್ ಹಣ್ಣು": "Fruits",
-    "ಕಲ್ಲಂಗಡಿ": "Fruits",
-    "ಮ್ಯಾಂಗೊಸ್ಟೀನ್ ಹಣ್ಣು": "Fruits",
-    "ಸೀಬೆ": "Fruits",
-    "ಚೇಪೆಹಣ್ನು": "Fruits",
-    "ಸೀತಾಫಲ": "Fruits",
-    "ರಾಮಫಲ": "Fruits",
-    "ದ್ರಾಕ್ಷಿ": "Fruits",
-    "ಕಿತ್ತಲೆ": "Fruits",
-    "ಬಾದಾಮಿ": "Fruits",
-    "ಮರಸೇಬು": "Fruits",
-    "ನೇರಳೆ": "Fruits",
-    "ಸೆಣಬು": "Sunn hemp",
-    "ಎಣ್ಣೆ ತಾಳೆ": "Oil palm",
-    "ಟೀ": "Tea",
-    "ಚೆಂಡುಹೂ": "Flowers",
-    "ಸುಗಂಧರಾಜ": "Flowers",
-    "ಕನಕಾಂಬರಿ": "Flowers",
-    "ಡೇಲಿಯಾ": "Flowers",
-    "ಹೆಬ್ಬೇವು": "Trees (timber)",
-    "ಶ್ರೀಗಂಧದ ಮರ": "Trees (timber)",
-    "ಮಹಾಗನಿ ಮರ": "Trees (timber)",
-    "ತೇಗದ ಮರ": "Trees (timber)",
-    "ಸಸ್ಯಗಾರ": "Nursery",
-    "ಬಾರ್ಲಿ": "Barley",
-    "ಬರಗು": "Proso millet",
-    "ಕೊರಲೆ": "Browntop millet",
-    "ಸಾವೆ": "Little millet",
-    "ಹರಳು": "Castor",
-    "ಔಡಲ": "Castor",
-    "ಅಗಸೆ": "Linseed",
-    "ತಂಬಾಕು": "Tobacco",
-    "ವರ್ಜೀನಿಯಾ": "Tobacco",
-    "ನಾಟಿಗಾಂಜಾ": "Tobacco",
-    "ಚಿವಿಂಗ್": "Tobacco",
-    "ಮಡಿಕಿ": "Moth bean",
-    "ಮಟಕಿ": "Moth bean",
-    "ಮಸೂರ ಬೀಜ": "Pulses (other)",
-    "ಬಟಾಣಿ": "Pulses (other)",
-    "ವಠಾಣಿ": "Pulses (other)",
-    "ಬಟಕಡ್ಲೆ": "Pulses (other)",
-    "ಚನ್ನಂಗಿ": "Pulses (other)",
-    "ಅಳವಿ ಕಾಳು": "Pulses (other)",
-    "ಚಿಯಾ ಬೆಳೆ": "Chia",
-    "ಪುಂಡಿನಾರು": "Sunn hemp",
-    "ನೀಲಿ": "Indigo",
-    "ಅರಿಶಿನ": "Turmeric",
-    "ಅಡಿಕೆ": "Arecanut",
-    "ವಿಳೇದೆಲೆ": "Betel leaf",
-    "ವೀಳ್ಯದೆಲೆ": "Betel leaf",
-    "ಮೆಣಸು": "Black pepper",
-    "ಕರಿಮೆಣಸು": "Black pepper",
-    "ಗೋಡಂಬಿ": "Cashew",
-    "ಗೇರು": "Cashew",
-    "ತಾಳೆ": "Palms",
-    "ಹುಲ್ಲು": "Fodder",
-    "ಹಸಿರು ಹುಲ್ಲು": "Fodder",
-    "ಎಳೆ ಮುಸುಕಿನ ಜೋಳ": "Maize",
-    "ಆಲೂಗಡ್ಡೆ": "Vegetables",
-    "ಬಟಾಟೆ": "Vegetables",
-    "ಗೆಣಸು": "Vegetables",
-    "ಮೂಲಂಗಿ": "Vegetables",
-    "ಸಾಮೆಗಡ್ಡ": "Vegetables",
-    "ಎಲೆಕೋಸು": "Vegetables",
-    "ದೊಣ್ಣೇಮೆಣಸಿನಕಾಯಿ": "Vegetables",
-    "ದಪ್ಪ ಮೆಣಸಿನಕಾಯಿ": "Vegetables",
-    "ಪೆಪ್ರಿಕಾ": "Chilli",
-    "ಓಮಿನಕಾಯಿ": "Vegetables",
-    "ಕಾಕಡ": "Vegetables",
-    "ಮಿಡಿಸೌತೆ": "Vegetables",
-    "ಪಡವಲಕಾಯಿ": "Vegetables",
-    "ಅಜವಾನ": "Leafy greens & herbs",
-    "ಸಬ್ಬಸಿಗೆ ಸೊಪ್ಪು": "Leafy greens & herbs",
-    "ನೆಲಬೇವು": "Leafy greens & herbs",
-    "ಮೊಸಂಬಿ": "Fruits",
-    "ಅಂಜೂರ": "Fruits",
-    "ಕರಬೂಜ": "Fruits",
-    "ಚಕೋತ": "Fruits",
-    "ಕಂಚಿಹಣ್ಣು": "Fruits",
-    "ಹುಳಿಕಂಚಿ": "Fruits",
-    "ಬೆಣ್ಣೆ ಹಣ್ಣು": "Fruits",
-    "ಲಿಚಿ": "Fruits",
-    "ಮೆಕೆಡೋಮಿಯ": "Fruits",
-    "ಮಲ್ಲಿಗೆ": "Flowers",
-    "ಸೇವಂತಿಗೆ": "Flowers",
-    "ಗುಲಾಬಿ": "Flowers",
-    "ಜೆರ್ಬೆರಾ": "Flowers",
-    "ಕ್ಯಾಲಾಲಿಲ್ಲಿ": "Flowers",
-    "ಸುಬಾಬುಲ್": "Trees (timber)",
-    "ಸಿಲ್ವರ್ ಓಕ್": "Trees (timber)",
-    "ಗಟ್ಟೆ ಬಿದಿರು": "Trees (timber)",
-    "ಬೀಟೆ ಮರ": "Trees (timber)",
-    "ಬೇವಿನ ಮರರ": "Trees (timber)",
-    "ಮರ ಮತ್ತು ಪೊದೆಗಳು": "Trees (timber)",
-    "ರೇಪುಬೀಜ ಮತ್ತು ಸಾಸಿವೆ": "Mustard",
-    "ದೈಂಚ": "Green manure (dhaincha)",
-    "ಸೋಂಪು": "Leafy greens & herbs",
-    "ಬಡೆಸೊಪ್": "Leafy greens & herbs",
-    "ಜೀರಿಗೆ": "Leafy greens & herbs",
-    "ಚಪ್ಪರದ ಅವರೆ": "Vegetables",
-    "ಚಿಕಡಿ ಕಾಯಿ": "Vegetables",
-    "ಬೆಳ್ಳುಳ್ಳಿ": "Vegetables",
-    "ಕ್ಯಾರೆಟ್": "Vegetables",
-    "ಗಜ್ಜರಿ": "Vegetables",
-    "ಹಸಿರು ಬಟಾಣಿ": "Vegetables",
-    "ಕೆಸುವಿನ ಗಡ್ಡೆ": "Vegetables",
-    "ನವಿಲುಕೋಸು": "Vegetables",
-    "ಹಲಸು": "Fruits",
-    "ಪ್ಯಾಶನ್ ಹಣ್ಣು": "Fruits",
-    "ಸ್ಟ್ರಾಬೆರಿ": "Fruits",
-    "ಕಾಶಿ ಕಣಗಿಲೆ": "Flowers",
-}
-
-# Variety marks the survey writes after the crop: local / high-yield, with or without a dash, or H/L.
-_VARIETY_TAIL = re.compile(
-	r"(?:\s*[-–]\s*|\s+)(?:H|L|ಸ್ಥಳೀಯ|ಸ್ಥಲೀಯ|ಅಧಿಕ ಇಳುವರಿ)\s*$",
-	re.I,
-)
-
-
-_CROP_EN_NFC = {unicodedata.normalize("NFC", k): v for k, v in CROP_EN.items()}
-
-
-def crop_en(kn: str) -> str:
-    """English name; the survey often lists synonyms in one name ("ಈರುಳ್ಳಿ, ಉಳ್ಳಾಗಡ್ಡಿ")."""
-    name = re.sub(r"[\u200c\u200d]", "", unicodedata.normalize("NFC", kn))
-    name = re.sub(r"\s*\(.*?\)\s*", " ", name).strip()
-    name = _VARIETY_TAIL.sub("", name).strip()
-    for part in [name, *re.split(r"\s*[,/]\s*", name)]:
-        en = _CROP_EN_NFC.get(part)
-        if en:
-            return en
-    return kn
 
 _local = threading.local()
 _modes_lock = threading.Lock()
@@ -439,14 +215,6 @@ def seasons_available() -> list[tuple[str, str, int]]:
                 out.append((key, f"{kind} {year}", year))
     return out
 
-
-def parse_extent(s: str) -> float | None:
-    """Acres-guntas-annas ("5-13-0.00") to hectares."""
-    m = re.fullmatch(r"\s*(\d+)-(\d+)-([\d.]+)\s*", s)
-    if not m:
-        return None
-    acres = int(m.group(1)) + int(m.group(2)) / 40 + float(m.group(3)) / 640
-    return acres * HA_PER_ACRE
 
 
 def crop_name(s: str) -> str:

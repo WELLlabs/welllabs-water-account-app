@@ -12,7 +12,6 @@ import gzip
 import json
 import logging
 import os
-import sys
 import threading
 import time
 from collections import defaultdict
@@ -22,11 +21,10 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
 
+from .crop_names import crop_en, parse_extent
 from .layers import BUCKET, _Layer, _respond
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT / "scripts"))
-from build_tlab_crops import crop_en, parse_extent  # noqa: E402
 
 log = logging.getLogger(__name__)
 
