@@ -110,27 +110,27 @@
 	}
 </script>
 
-<aside class="panel" aria-label="Soil moisture for the selected cell">
+<aside class="panel" aria-label="Relative soil moisture for the selected cell">
 	<header>
 		<div class="title">
 			<span class="sw" style:background="linear-gradient(135deg, {SM_PALETTE[1]}, {SM_PALETTE[4]}, {SM_PALETTE[7]})"></span>
 			<div>
-				<h2>Soil moisture</h2>
+				<h2>Relative soil moisture</h2>
 				<p class="meta">
 					Cell {cellToken ?? '—'} · surface, top ~5 cm
 					<small>Sentinel-1 radar, mean of the cell's {soil.resolutionM} m pixels</small>
 				</p>
 			</div>
 		</div>
-		<button type="button" class="close" onclick={onClose} aria-label="Close soil moisture">×</button>
+		<button type="button" class="close" onclick={onClose} aria-label="Close relative soil moisture">×</button>
 	</header>
 
 	{#if soil.status !== 'done'}
-		<section><p class="muted">Loading soil moisture…</p></section>
+		<section><p class="muted">Loading relative soil moisture…</p></section>
 	{:else if !stats}
 		<section>
 			<p class="muted">
-				No soil moisture for this cell. Radar can't measure it over towns, rock, open water or where the
+				No relative soil moisture for this cell. Radar can't measure it over towns, rock, open water or where the
 				backscatter barely changes through the year.
 			</p>
 		</section>
@@ -168,7 +168,7 @@
 		<section>
 			<h3>Monthly time series</h3>
 			<p class="muted">Mean of the passes in each month. Click a bar to show that month's last pass on the map.</p>
-			<svg class="chart" viewBox="0 0 {W} {H + 14}" role="img" aria-label="Monthly mean soil moisture for the selected cell">
+			<svg class="chart" viewBox="0 0 {W} {H + 14}" role="img" aria-label="Monthly mean relative soil moisture for the selected cell">
 				{#each [0, 50, 100] as t}
 					{@const y = H - (t / Y_MAX) * (H - 4)}
 					<line x1={AXIS} x2={W} y1={y} y2={y} class="grid" />

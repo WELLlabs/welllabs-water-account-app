@@ -5,9 +5,13 @@
 		LAYERS,
 		LAYER_BY_TYPE,
 		colorizeGrey,
-		loadGreyPixels,
+		cropColor,
 		etImageUrl,
+		fieldSeasonCrop,
+		formatCropLabel,
+		loadGreyPixels,
 		canalStyle,
+		UNCERTAIN_COLOR,
 		type GreyPixels,
 		type AgriCellResponse,
 		type AgriFeature,
@@ -50,6 +54,18 @@
 		onWaterPlotSelect: (plotId: string) => void;
 		onCellSelect: (cellId: string) => void;
 		onFeatureSelect: (feature: AgriFeature) => void;
+		villages?: GeoJSON.FeatureCollection | null;
+		showVillages?: boolean;
+		/** Cadastral parcels (properties.pid), coloured by cropPlotFills */
+		cropPlots?: GeoJSON.FeatureCollection | null;
+		cropPlotFills?: Map<string, string>;
+		cropPlotTooltip?: (pid: string) => string | null;
+		selectedCropPlot?: string | null;
+		onCropPlotSelect?: (pid: string) => void;
+		/** Colour farm plots by the predicted crop for this season key ("Kharif 2025") */
+		fieldCropSeason?: string | null;
+		/** Map extent and zoom after every move */
+		onView?: (bounds: [[number, number], [number, number]], zoom: number) => void;
 	}
 
 	let {
@@ -81,7 +97,16 @@
 		waterSelectedCrop,
 		onWaterPlotSelect,
 		onCellSelect,
-		onFeatureSelect
+		onFeatureSelect,
+		villages = null,
+		showVillages = false,
+		cropPlots = null,
+		cropPlotFills = new Map(),
+		cropPlotTooltip = () => null,
+		selectedCropPlot = null,
+		onCropPlotSelect = () => {},
+		fieldCropSeason = null,
+		onView = () => {}
 	}: Props = $props();
 
 	const RASTER_CACHE = 40;
@@ -111,6 +136,7 @@
 	// Grid and features share one canvas: Leaflet canvases don't pass events to canvases below,
 	// so a separate feature canvas would swallow every grid click once a cell has loaded.
 	let vectorRenderer: Leaflet.Canvas | null = null;
+	let boundaryRenderer: Leaflet.Canvas | null = null;
 
 	let boundaryLayer = $state.raw<Leaflet.GeoJSON | null>(null);
 	let gridLayer = $state.raw<Leaflet.GeoJSON | null>(null);
@@ -123,11 +149,10 @@
 	const DRAW_ORDER: AluType[] = ['field', 'trees', 'other_water', 'farm_pond', 'dug_well'];
 
 	function gridBaseStyle(): Leaflet.PathOptions {
-		const zoom = map?.getZoom() ?? 9;
 		return {
 			color: '#ffffff',
-			weight: zoom < 10 ? 0.35 : zoom < 12 ? 0.6 : 1,
-			opacity: zoom < 10 ? 0.45 : 0.7,
+			weight: 0.6,
+			opacity: 0.6,
 			fillColor: '#1b75e0',
 			fillOpacity: 0.02
 		};
@@ -151,7 +176,7 @@
 		const fill = cellFills?.get(id);
 		if (!fill) return base;
 		// The selected cell's own plots carry the colour, so its fill would only hide them
-		const opacity = waterPlots != null && id === selectedCellId ? 0 : 1;
+		const opacity = (waterPlots != null || cropPlots != null) && id === selectedCellId ? 0 : 1;
 		return { ...base, fillColor: fill, fillOpacity: opacity };
 	}
 
@@ -175,6 +200,8 @@
 	/** Keep features above the grid and the selection outline on top of everything */
 	function restack() {
 		if (!map) return;
+		cropPlotLayer?.bringToFront();
+		if (selectedCropPlot) cropPlotById.get(selectedCropPlot)?.bringToFront();
 		for (const type of DRAW_ORDER) {
 			const layer = featureLayers[type];
 			if (layer && map.hasLayer(layer)) layer.bringToFront();
@@ -237,6 +264,131 @@
 		});
 	});
 
+	let cropPlotLayer: Leaflet.GeoJSON | null = null;
+	const cropPlotById = new Map<string, Leaflet.Path>();
+
+	function cropPlotStyle(pid: string): Leaflet.PathOptions {
+		const fill = cropPlotFills.get(pid);
+		if (pid === selectedCropPlot) return { color: '#f472b6', weight: 3, opacity: 1, fillColor: fill ?? '#ffffff', fillOpacity: fill ? 0.95 : 0.1 };
+		return {
+			color: '#ffffff',
+			weight: 0.8,
+			opacity: 0.75,
+			fillColor: fill ?? '#ffffff',
+			fillOpacity: fill ? 0.85 : 0.04
+		};
+	}
+
+	$effect(() => {
+		const fc = cropPlots;
+		if (!L || !map) return;
+		const leaflet = L;
+		const m = map;
+		untrack(() => {
+			cropPlotLayer?.remove();
+			cropPlotLayer = null;
+			cropPlotById.clear();
+			if (!fc) return;
+			cropPlotLayer = leaflet.geoJSON(fc, <RenderedGeoJSONOptions>{
+				renderer: vectorRenderer!,
+				style: (f) => cropPlotStyle(String(f?.properties?.pid)),
+				onEachFeature: (f, layer) => {
+					const pid = String(f.properties?.pid);
+					const path = layer as Leaflet.Path;
+					cropPlotById.set(pid, path);
+					path.on('mouseover', (e: Leaflet.LeafletMouseEvent) => {
+						path.setStyle({ weight: 2.5, opacity: 1 });
+						const tip = cropPlotTooltip(pid);
+						if (tip) path.bindTooltip(tip, { sticky: true, className: 'tlab-canal-tip' }).openTooltip(e.latlng);
+					});
+					path.on('mouseout', () => {
+						path.setStyle(cropPlotStyle(pid));
+						path.unbindTooltip();
+					});
+					path.on('click', (e: Leaflet.LeafletMouseEvent) => {
+						leaflet.DomEvent.stop(e);
+						onCropPlotSelect(pid);
+					});
+				}
+			});
+			cropPlotLayer.addTo(m);
+			restack();
+		});
+	});
+
+	$effect(() => {
+		void cropPlotFills;
+		void selectedCropPlot;
+		untrack(() => {
+			for (const [pid, layer] of cropPlotById) layer.setStyle(cropPlotStyle(pid));
+			restack();
+		});
+	});
+
+	let villageLayer: Leaflet.GeoJSON | null = null;
+
+	function villageStyle(): Leaflet.PathOptions {
+		const near = (map?.getZoom() ?? zoom) >= 12;
+		return { color: '#e2e8f0', weight: near ? 1.2 : 0.5, opacity: near ? 0.85 : 0.4, fill: false };
+	}
+
+	function clearVillageLabels() {
+		villageLayer?.eachLayer((layer) => {
+			const path = layer as Leaflet.Layer;
+			if (path.getTooltip?.()) path.unbindTooltip();
+		});
+	}
+
+	function syncVillageLabels() {
+		if (!villageLayer || !map || !showVillages || map.getZoom() < 12) {
+			clearVillageLabels();
+			return;
+		}
+		const bounds = map.getBounds();
+		villageLayer.eachLayer((layer) => {
+			const path = layer as Leaflet.Polyline & { _villageName?: string };
+			const inView = typeof path.getBounds === 'function' && bounds.intersects(path.getBounds());
+			const has = path.getTooltip();
+			if (inView && !has) {
+				path
+					.bindTooltip(path._villageName ?? '', {
+						permanent: true,
+						direction: 'center',
+						className: 'tlab-village-label'
+					})
+					.openTooltip();
+			} else if (!inView && has) {
+				path.unbindTooltip();
+			}
+		});
+	}
+
+	$effect(() => {
+		const fc = villages;
+		if (!L || !map) return;
+		if (fc && !villageLayer) {
+			villageLayer = L.geoJSON(fc, <RenderedGeoJSONOptions>{
+				pane: 'tlabBoundary',
+				renderer: boundaryRenderer!,
+				interactive: false,
+				style: villageStyle,
+				onEachFeature: (feature, layer) => {
+					(layer as Leaflet.Layer & { _villageName?: string })._villageName = String(
+						feature.properties?.name ?? ''
+					);
+				}
+			});
+		}
+		if (!villageLayer) return;
+		if (showVillages) {
+			villageLayer.addTo(map);
+			untrack(syncVillageLabels);
+		} else {
+			clearVillageLabels();
+			villageLayer.remove();
+		}
+	});
+
 	export function zoomToWaterPlot(id: string) {
 		const layer = waterPlotById.get(id) as Leaflet.Polygon | undefined;
 		if (map && layer) map.fitBounds(layer.getBounds(), { padding: [80, 80], maxZoom: 18 });
@@ -276,7 +428,8 @@
 		m.on('mouseout', clearPointer);
 		mapContainer.addEventListener('mouseleave', clearPointer);
 
-		vectorRenderer = leaflet.canvas({ pane: 'tlabVectors', padding: 0.5 });
+		vectorRenderer = leaflet.canvas({ pane: 'tlabVectors', padding: 0.2, updateWhenZooming: false });
+		boundaryRenderer = leaflet.canvas({ pane: 'tlabBoundary', padding: 0.2, updateWhenZooming: false });
 
 		const imagery = leaflet.tileLayer(
 			'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
@@ -301,13 +454,28 @@
 		const syncZoomClasses = () => {
 			mapContainer.classList.toggle('tlab-zoomed-out', m.getZoom() < 12);
 		};
+		m.on('zoomstart', () => {
+			mapContainer.classList.add('tlab-zooming');
+			untrack(clearVillageLabels);
+		});
 		m.on('zoomend', () => {
-			untrack(restyleCells);
+			mapContainer.classList.remove('tlab-zooming');
 			syncZoomClasses();
 			zoom = m.getZoom();
 			untrack(updateFocusClip);
 		});
 		m.on('viewreset', () => untrack(updateFocusClip));
+		m.on('moveend', () => {
+			untrack(syncVillageLabels);
+			const b = m.getBounds();
+			onView(
+				[
+					[b.getSouth(), b.getWest()],
+					[b.getNorth(), b.getEast()]
+				],
+				m.getZoom()
+			);
+		});
 		syncZoomClasses();
 
 		resizeObserver = new ResizeObserver(() => m.invalidateSize());
@@ -327,8 +495,9 @@
 
 	$effect(() => {
 		if (!L || !map || !boundary || boundaryLayer) return;
-		boundaryLayer = L.geoJSON(boundary, {
+		boundaryLayer = L.geoJSON(boundary, <RenderedGeoJSONOptions>{
 			pane: 'tlabBoundary',
+			renderer: boundaryRenderer!,
 			interactive: false,
 			style: { color: '#fde047', weight: 2.5, opacity: 1, fill: false }
 		});
@@ -383,6 +552,7 @@
 		void cellFills;
 		void showGrid;
 		void waterPlots;
+		void cropPlots;
 		void selectedCellId;
 		if (!gridLayer) return;
 		untrack(restyleCells);
@@ -449,8 +619,9 @@
 		const m = map;
 		untrack(() => {
 			if (!focusGrid) {
-				focusGrid = leaflet.geoJSON(grid!, {
+				focusGrid = leaflet.geoJSON(grid!, <RenderedGeoJSONOptions>{
 					pane: 'tlabBoundary',
+					renderer: boundaryRenderer!,
 					interactive: false,
 					style: () => focusOutlineStyle,
 					onEachFeature: (f, layer) => focusOutlines.set(String(f.properties?.cellId ?? ''), layer as Leaflet.Path)
@@ -470,7 +641,7 @@
 	});
 
 	$effect(() => {
-		mapContainer?.classList.toggle('tlab-plots-focus', focused && waterPlots != null);
+		mapContainer?.classList.toggle('tlab-plots-focus', focused && (waterPlots != null || cropPlots != null));
 	});
 
 	function outsideFocus(latlng: Leaflet.LatLng): boolean {
@@ -641,8 +812,9 @@
 		const fc = wucs;
 		if (!L || !map) return;
 		if (fc && !wucsLayer) {
-			wucsLayer = L.geoJSON(fc, {
+			wucsLayer = L.geoJSON(fc, <RenderedGeoJSONOptions>{
 				pane: 'tlabBoundary',
+				renderer: boundaryRenderer!,
 				interactive: false,
 				style: { color: '#fb923c', weight: 2, opacity: 0.95, dashArray: '6 4', fill: false },
 				onEachFeature: (feature, layer) => {
@@ -679,7 +851,7 @@
 		const fc = canals;
 		if (!L || !map) return;
 		if (fc && !canalLayer) {
-			const renderer = L.svg({ pane: 'tlabCanals' });
+			const renderer = L.svg({ pane: 'tlabCanals', padding: 0.2, updateWhenZooming: false });
 			canalLayer = L.geoJSON(fc, {
 				pane: 'tlabCanals',
 				style: (f) => {
@@ -722,6 +894,18 @@
 		layer.on('click', () => onFeatureSelect(feature));
 	}
 
+	function fieldStyle(feature: AgriFeature): Leaflet.PathOptions {
+		const crop = fieldSeasonCrop(feature.properties?.monitoring_prediction, fieldCropSeason);
+		const fill = crop ? cropColor(crop) : UNCERTAIN_COLOR;
+		return {
+			color: '#ffffff',
+			weight: 1.1,
+			opacity: 0.9,
+			fillColor: fill,
+			fillOpacity: crop ? 0.72 : 0.28
+		};
+	}
+
 	function buildTypeLayer(type: AluType, features: AgriFeature[]): Leaflet.FeatureGroup {
 		const leaflet = L!;
 		const color = LAYER_BY_TYPE[type]?.color ?? '#94a3b8';
@@ -738,12 +922,32 @@
 			return group;
 		}
 
+		if (type === 'field') {
+			return leaflet.geoJSON(features as GeoJSON.Feature[], <RenderedGeoJSONOptions>{
+				renderer: vectorRenderer!,
+				style: (f) => fieldStyle(f as AgriFeature),
+				onEachFeature: (feature, layer) => {
+					const f = feature as AgriFeature;
+					const path = layer as Leaflet.Path;
+					const base = fieldStyle(f);
+					const crop = fieldSeasonCrop(f.properties?.monitoring_prediction, fieldCropSeason);
+					path.bindTooltip(
+						crop
+							? `<strong>${formatCropLabel(crop)}</strong>`
+							: '<span style="color:#64748b">No crop prediction this season</span>',
+						{ sticky: true, className: 'tlab-canal-tip' }
+					);
+					registerFeature(f, path, base);
+				}
+			});
+		}
+
 		const base: Leaflet.PathOptions = {
 			color,
 			weight: type === 'trees' ? 1 : 1.6,
 			opacity: 1,
 			fillColor: color,
-			fillOpacity: type === 'field' ? 0.18 : 0.35
+			fillOpacity: 0.35
 		};
 		return leaflet.geoJSON(features as GeoJSON.Feature[], <RenderedGeoJSONOptions>{
 			renderer: vectorRenderer!,
@@ -768,6 +972,7 @@
 
 	$effect(() => {
 		const current = data;
+		void fieldCropSeason;
 		if (!L || !map) return;
 
 		for (const layer of Object.values(featureLayers)) layer?.remove();
@@ -904,7 +1109,28 @@
 		display: none;
 	}
 
-	:global(.tlab-zoomed-out .leaflet-tooltip.tlab-wucs-label) {
+	:global(.tlab-zoomed-out .leaflet-tooltip.tlab-wucs-label),
+	:global(.tlab-zoomed-out .leaflet-tooltip.tlab-village-label) {
+		display: none;
+	}
+
+	:global(.tlab-zooming .leaflet-tooltip-pane) {
+		visibility: hidden;
+	}
+
+	:global(.leaflet-tooltip.tlab-village-label) {
+		background: none;
+		border: none;
+		box-shadow: none;
+		color: #f8fafc;
+		font-family: 'Montserrat', sans-serif;
+		font-size: 0.66rem;
+		font-weight: 600;
+		text-shadow: 0 0 3px #0f172a, 0 0 2px #0f172a;
+		padding: 0;
+	}
+
+	:global(.leaflet-tooltip.tlab-village-label::before) {
 		display: none;
 	}
 

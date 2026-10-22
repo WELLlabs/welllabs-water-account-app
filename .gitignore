@@ -26,3 +26,18 @@ api/.venv/
 __pycache__/
 *.pyc
 .Python
+
+# Resumable T-Lab build checkpoints (aggregates only)
+.cache/
+
+# Offline scrape / GIS inputs (large; folder itself stays visible in the explorer)
+data-scraping/chikkaballapur/
+data-scraping/chikkaballapur_raw/
+data-scraping/raichur_raw/
+data-scraping/S1_indices_5x5/
+data-scraping/*.gpkg
+data-scraping/*.gpkg-*
+data-scraping/*.geojson
+data-scraping/*.tif
+data-scraping/*.tiff
+data-scraping

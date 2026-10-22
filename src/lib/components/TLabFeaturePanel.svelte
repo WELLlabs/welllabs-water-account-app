@@ -3,26 +3,35 @@
 	import {
 		LAYER_BY_TYPE,
 		cropColor,
+		fieldSeasonCrop,
 		formatCropLabel,
 		formatDate,
 		formatPct,
 		geometryCenter,
 		seasonBars,
+		UNCERTAIN_COLOR,
 		type AgriFeature
 	} from '$lib/tlab';
 
 	interface Props {
 		feature: AgriFeature;
 		cellToken: string | null;
+		seasonKey?: string | null;
 		onClose: () => void;
 	}
 
-	let { feature, cellToken, onClose }: Props = $props();
+	let { feature, cellToken, seasonKey = null, onClose }: Props = $props();
 
 	const attrs = $derived(feature.properties ?? { alu_type: 'unknown' });
 	const def = $derived(LAYER_BY_TYPE[attrs.alu_type]);
 	const center = $derived(geometryCenter(feature.geometry));
 	const bars = $derived(seasonBars(attrs.monitoring_prediction));
+	const seasonCrop = $derived(
+		attrs.alu_type === 'field' ? fieldSeasonCrop(attrs.monitoring_prediction, seasonKey) : null
+	);
+	const swatch = $derived(
+		seasonCrop ? cropColor(seasonCrop) : def?.color ?? UNCERTAIN_COLOR
+	);
 
 	const area = $derived(attrs.area_sq_m ?? null);
 
@@ -59,9 +68,9 @@
 <aside class="panel" aria-label="Feature details">
 	<header>
 		<div class="title">
-			<span class="sw" style:background={def?.color ?? '#94a3b8'}></span>
+			<span class="sw" style:background={swatch}></span>
 			<div>
-				<h2>{def?.singular ?? attrs.alu_type}</h2>
+				<h2>{seasonCrop ? formatCropLabel(seasonCrop) : (def?.singular ?? attrs.alu_type)}</h2>
 				{#if feature.id}
 					<button type="button" class="code" onclick={copyCode} title="Copy plus code">
 						{feature.id}

@@ -2,7 +2,7 @@ import { readGpkgFeatureCollection } from './gpkgParser';
 import { loadShapefileFromFiles, looksLikeShapefileInput } from './shapefileImport';
 import { formatCrop, seasonLabel } from './tlab';
 import { downloadBlob, waterExportBaseName } from './exportUtils';
-import { GROUP_PALETTE } from './groupUtils';
+import { cropFill } from './cropColors';
 import type { ProcessedGeoJson } from './gpkgParser';
 import {
 	calculateWaterSchedule,
@@ -571,8 +571,7 @@ export function summaryTotals(summary: { rows: CropSummaryRow[]; months: MonthKe
 	};
 }
 
-/** Crop → colour, in the same order FarmMap's group view assigns them */
+/** Crop → colour, shared with crop survey and field landscape */
 export function cropColorMap(crops: string[]): Map<string, string> {
-	const sorted = [...new Set(crops)].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-	return new Map(sorted.map((c, i) => [c, GROUP_PALETTE[i % GROUP_PALETTE.length]]));
+	return new Map([...new Set(crops)].map((c) => [c, cropFill(c)]));
 }

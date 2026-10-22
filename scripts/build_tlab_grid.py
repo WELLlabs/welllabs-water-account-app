@@ -18,7 +18,8 @@ from shapely.geometry import Polygon
 from shapely.prepared import prep
 
 ROOT = Path(__file__).resolve().parent.parent
-SRC = ROOT / "Raichur_DT.geojson"
+# Local GIS inputs live under data-scraping/ (not served by the website).
+SRC = ROOT / "data-scraping" / "Raichur_DT.geojson"
 OUT_DIR = ROOT / "static" / "tlab"
 S2_LEVEL = 13
 COORD_DECIMALS = 5

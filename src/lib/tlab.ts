@@ -1,3 +1,5 @@
+import { cropFill } from './cropColors';
+
 export type AluType = 'field' | 'dug_well' | 'farm_pond' | 'other_water' | 'trees';
 
 export interface MonitoringPrediction {
@@ -108,37 +110,28 @@ export function formatCrop(name: string | undefined): string {
 		.join(' ');
 }
 
-const CROP_COLORS: Record<string, string> = {
-	BAJRA: '#d97706',
-	CHILLI: '#dc2626',
-	COTTON: '#a78bfa',
-	CORN: '#facc15',
-	RICE: '#16a34a',
-	GRAM: '#92400e',
-	SORGHUM: '#db2777',
-	GROUNDNUT: '#0d9488',
-	SUGARCANE: '#65a30d',
-	WHEAT: '#eab308',
-	TUR: '#7c3aed',
-	SUNFLOWER: '#fbbf24',
-	UNKNOWN_CROP: '#94a3b8',
-	NO_PREDICTION: '#cbd5e1'
-};
-
-const FALLBACK_COLORS = ['#0ea5e9', '#14b8a6', '#ec4899', '#8b5cf6', '#f43f5e', '#84cc16', '#06b6d4'];
-
 export const UNCERTAIN_COLOR = '#e2e8f0';
 
 export function cropColor(crop: string): string {
-	if (CROP_COLORS[crop]) return CROP_COLORS[crop];
-	let h = 0;
-	for (const c of crop) h = (h * 31 + c.charCodeAt(0)) >>> 0;
-	return FALLBACK_COLORS[h % FALLBACK_COLORS.length];
+	return cropFill(crop);
 }
 
 export function formatCropLabel(crop: string): string {
 	if (crop === 'NO_PREDICTION') return 'No prediction';
 	return formatCrop(crop);
+}
+
+/** Leading predicted crop for a season key ("Kharif 2025"); latest season if key is omitted. */
+export function fieldSeasonCrop(
+	preds: MonitoringPrediction[] | undefined,
+	seasonKey?: string | null
+): string | null {
+	const bars = seasonBars(preds);
+	if (!bars.length) return null;
+	const bar = seasonKey ? bars.find((b) => `${b.season} ${b.year}` === seasonKey) : bars.at(-1);
+	const crop = bar?.segments[0]?.crop;
+	if (!crop || crop === 'UNKNOWN_CROP' || crop === 'NO_PREDICTION') return null;
+	return crop;
 }
 
 /** Indian cropping season from the season's start date: Kharif (Jun–Sep), Rabi (Oct–Jan), Summer (Feb–May) */

@@ -20,7 +20,7 @@ from osgeo import gdal
 gdal.UseExceptions()
 
 ROOT = Path(__file__).resolve().parent.parent
-SRC_DIR = ROOT / "S1_indices_5x5"
+SRC_DIR = ROOT / "data-scraping" / "S1_indices_5x5"
 WUCS_ZIP = SRC_DIR / "Claude outputs" / "TLBC_D95_WUCS_Boundary.zip"
 OUT_DIR = ROOT / "static" / "tlab" / "dprvi"
 NAME_RE = re.compile(r"^DpRVIc_(\d{4})(\d{2})(\d{2})\.tif$")

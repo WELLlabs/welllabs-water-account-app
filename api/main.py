@@ -16,6 +16,7 @@ from fastapi.responses import Response
 from .agri import router as agri_router
 from .hydro import router as hydro_router
 from .layers import router as layers_router
+from .raw_crops import router as raw_crops_router
 from .qgz_builder import build_qgz
 
 # Chunked uploads land here (each chunk stays under nginx's default 1m limit)
@@ -34,6 +35,7 @@ app.add_middleware(
 
 app.include_router(agri_router)
 app.include_router(hydro_router)
+app.include_router(raw_crops_router)
 app.include_router(layers_router)
 
 

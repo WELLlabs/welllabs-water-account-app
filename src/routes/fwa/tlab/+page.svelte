@@ -6,16 +6,23 @@
 	import TLabWaterPanel from '$lib/components/TLabWaterPanel.svelte';
 	import TLabEtPanel from '$lib/components/TLabEtPanel.svelte';
 	import TLabSmPanel from '$lib/components/TLabSmPanel.svelte';
-	import TLabWaterControls from '$lib/components/TLabWaterControls.svelte';
+	import TLabCropPanel from '$lib/components/TLabCropPanel.svelte';
+	import TLabWaterControls, { type WaterCropSource } from '$lib/components/TLabWaterControls.svelte';
+	import TLabMapHud from '$lib/components/TLabMapHud.svelte';
 	import { fmt, fmtAcres } from '$lib/components/cropcalc/format';
-	import { TLabWater, WATER_PALETTE } from '$lib/tlabWater.svelte';
+	import { TLabWater, WATER_PALETTE, seasonParts } from '$lib/tlabWater.svelte';
 	import { SM_BREAKS, SM_LUT, SM_PALETTE, TLabSoil, smColor, smFromByte } from '$lib/tlabSoil.svelte';
+	import { FOCUS_BREAKS, TLabCrops, cropText, fmtHa, focusRamp, primaryKn } from '$lib/tlabCrops.svelte';
+	import { CROP_SWATCHES } from '$lib/cropColors';
 	import {
 		LAYERS,
 		DPRVI_BASE,
 		CANAL_TYPES,
 		ET_COLORS,
+		cropColor,
+		fieldSeasonCrop,
 		formatAcres,
+		formatCropLabel,
 		geometryCenter,
 		monthRange,
 		type EtPoint,
@@ -51,7 +58,9 @@
 		landscape: false,
 		et: false,
 		sm: false,
+		crops: false,
 		boundaries: false,
+		villages: false,
 		canals: false,
 		grid: false
 	});
@@ -79,13 +88,25 @@
 		water: [AGRI_SOURCE, { label: 'WELL Labs crop water budgets (CSV)', href: '/total_water_needed.csv' }],
 		landscape: [AGRI_SOURCE],
 		et: [
-			{ label: 'NRSC Bhuvan-NHP actual ET (750 m)', href: 'https://bhuvan.nrsc.gov.in/nhp/webgis-et/map' },
-			{ label: 'product note (PDF)', href: 'https://bhuvan.nrsc.gov.in/nhpfs/pdf/ET_750m.pdf' }
+			{
+				label: 'NRSC/ISRO Bhuvan NHP actual evapotranspiration (SNPP-VIIRS)',
+				href: 'https://bhuvan.nrsc.gov.in/nhpgs/nhp_evapotranspiration/wms'
+			}
 		],
 		sm: [
-			{ label: 'ESA Copernicus Sentinel-1', href: 'https://www.esa.int/Applications/Observing_the_Earth/Copernicus/Sentinel-1' },
-			{ label: 'Sentinel-1 RTC on Microsoft Planetary Computer', href: 'https://planetarycomputer.microsoft.com/dataset/sentinel-1-rtc' },
-			{ label: 'method: Copernicus Sentinel-1 soil moisture', href: 'https://land.copernicus.eu/en/products/soil-moisture/daily-surface-soil-moisture-v1.0' }
+			{
+				label: 'Sentinel-1 RTC (10 m) on Microsoft Planetary Computer',
+				href: 'https://planetarycomputer.microsoft.com/dataset/sentinel-1-rtc'
+			},
+			{ label: 'WELL Labs relative soil moisture (change detection); not published as a public product' }
+		],
+		crops: [
+			{ label: 'Karnataka crop survey (Dept. of Agriculture)', href: 'https://cropsurvey.karnataka.gov.in/' },
+			{ label: 'WELL Labs Raichur FRUITS scrape (raichur_raw on S3); not a public catalog' },
+			{ label: 'KGIS cadastral maps (KSRSAC)', href: 'https://kgis.ksrsac.in/kgismaps2/rest/services/CadastralData_Admin/Dynamic_CadastralData_Admin/MapServer' }
+		],
+		villages: [
+			{ label: 'KGIS village boundaries (KSRSAC)', href: 'https://kgis.ksrsac.in/kgismaps2/rest/services/CadastralData_Admin/Dynamic_CadastralData_Admin/MapServer/4' }
 		],
 		boundaries: [{ label: 'WELL Labs project files (Raichur_DT.geojson, TLBC D-95 WUCS boundary); not published online' }],
 		canals: [
@@ -94,30 +115,45 @@
 		],
 		grid: [{ label: 'S2 Geometry, level 13 (the Google API’s cell grid)', href: 'https://s2geometry.io/devguide/s2cell_hierarchy' }]
 	};
+	const RESOLUTION: Record<string, string> = {
+		water: 'S2 level 13 (~1.3 km); plot outlines from Google ALU',
+		landscape: 'Field polygons in the selected S2 level-13 cell',
+		et: '750 m, monthly (SNPP-VIIRS energy balance)',
+		sm: '250 m (from 10 m Sentinel-1 RTC)',
+		crops: 'Survey-number extents from raichur_raw on S3; parcels after a cell click',
+		boundaries: 'Vector (district / WUCS)',
+		villages: 'KGIS village polygons',
+		canals: 'Vector (India-WRIS canal types)',
+		grid: 'S2 level 13 (~1.3 km)'
+	};
 
 	const water = new TLabWater();
 	onDestroy(() => water.destroy());
 	let waterPanelHidden = $state(false);
+	let waterCropSource = $state<WaterCropSource>('gapi');
 	onMount(() => void water.load());
 
 	/** Data layers colour the whole district, so only one is shown at a time */
-	type DataLayer = 'water' | 'landscape' | 'et' | 'sm';
+	type DataLayer = 'water' | 'landscape' | 'et' | 'sm' | 'crops';
 	let dataLayer = $state<DataLayer | null>('water');
 	const showWater = $derived(dataLayer === 'water');
 	const showLandscape = $derived(dataLayer === 'landscape');
 	const showEt = $derived(dataLayer === 'et');
 	const showSm = $derived(dataLayer === 'sm');
+	const showCrops = $derived(dataLayer === 'crops');
 
 	function setDataLayer(layer: DataLayer, on: boolean) {
 		dataLayer = on ? layer : dataLayer === layer ? null : dataLayer;
 		if (dataLayer !== 'landscape') selectedFeature = null;
 		if (!on) return;
-		for (const k of ['water', 'landscape', 'et', 'sm'] as const) openSec[k] = k === layer;
+		for (const k of ['water', 'landscape', 'et', 'sm', 'crops'] as const) openSec[k] = k === layer;
 		if (layer === 'water' && water.status === 'error') void water.load();
 	}
 
-	const waterFills = $derived(showWater && water.totals ? water.fills : null);
-	const waterCellShown = $derived(showWater && selectedCellId != null && water.cellId === selectedCellId);
+	const waterFromGapi = $derived(showWater && waterCropSource === 'gapi');
+	const waterFromSurvey = $derived(showWater && waterCropSource === 'survey');
+	const waterFills = $derived(waterFromGapi && water.totals ? water.fills : null);
+	const waterCellShown = $derived(waterFromGapi && selectedCellId != null && water.cellId === selectedCellId);
 	const waterPlots = $derived(waterCellShown ? water.processed : null);
 	const mapVisible = $derived.by(() => {
 		const out = { ...visible };
@@ -126,7 +162,7 @@
 	});
 	$effect(() => {
 		const id = selectedCellId;
-		if (!showWater || !id || !boundary || !water.cellIds.has(id)) return;
+		if (!waterFromGapi || !id || !boundary || !water.cellIds.has(id)) return;
 		untrack(() => {
 			if (water.cellId === id) return;
 			waterPanelHidden = false;
@@ -274,7 +310,146 @@
 	const smCellValue = $derived(
 		showSm && selectedCellId && soil.status === 'done' ? soil.cellValue(selectedCellId) : null
 	);
-	const cellFills = $derived(showWater ? waterFills : null);
+	const crops = new TLabCrops();
+	let cropPanelHidden = $state(false);
+	$effect(() => {
+		if (showCrops || waterFromSurvey) untrack(() => void crops.load());
+	});
+	const cropFocus = $derived(crops.focus != null ? crops.groups[crops.focus] : null);
+	/** Season picker: years, then the seasons that year has */
+	const cropYears = $derived([...new Set(crops.seasons.map((s) => s.year))].sort((a, b) => b - a));
+	const cropYearSeasons = $derived(crops.seasons.filter((s) => s.year === crops.season?.year));
+	function setCropYear(year: number) {
+		const same = crops.seasons.find((s) => s.year === year && s.kind === crops.season?.kind);
+		crops.seasonKey = (same ?? crops.seasons.find((s) => s.year === year))?.key ?? crops.seasonKey;
+	}
+	function cropSeasonMatchingWater(key: string): string | null {
+		const { season, year } = seasonParts(key);
+		return (
+			crops.seasons.find((s) => s.year === year && s.kind === season)?.key ??
+			crops.seasons.find((s) => s.year === year)?.key ??
+			null
+		);
+	}
+	function waterSeasonMatchingCrop(year: number, kind: string): string | null {
+		return water.seasons.find((s) => {
+			const p = seasonParts(s.key);
+			return p.year === year && p.season === kind;
+		})?.key ?? null;
+	}
+	function setWaterCropSource(next: WaterCropSource) {
+		waterCropSource = next;
+		if (next === 'survey' && water.seasonKey) {
+			const key = cropSeasonMatchingWater(water.seasonKey);
+			if (key) crops.seasonKey = key;
+		} else if (next === 'gapi' && crops.season) {
+			const key = waterSeasonMatchingCrop(crops.season.year, crops.season.kind);
+			if (key) water.setSeason(key);
+		}
+	}
+	function setSurveyYear(year: number) {
+		setCropYear(year);
+		if (water.years.includes(year)) water.setYear(year);
+	}
+	function setSurveySeason(key: string) {
+		crops.seasonKey = key;
+		const s = crops.seasons.find((x) => x.key === key);
+		if (!s) return;
+		const match = waterSeasonMatchingCrop(s.year, s.kind);
+		if (match) water.setSeason(match);
+	}
+	const surveyHudSeasons = $derived(cropYearSeasons.map((s) => ({ key: s.key, label: s.kind })));
+	const surveyHudLegend = $derived(
+		crops.district
+			.filter((a) => !a.group.idle)
+			.slice(0, 10)
+			.map((a) => ({
+				color: a.group.color,
+				label: cropText(a.group),
+				count: `${fmtHa(a.ha)} ha`
+			}))
+	);
+	const landscapeYear = $derived(water.seasonKey ? seasonParts(water.seasonKey).year : null);
+	const landscapeSeasons = $derived(
+		(landscapeYear != null ? water.seasonsForYear(landscapeYear) : []).map((s) => {
+			const p = seasonParts(s.key);
+			return { key: s.key, label: `${p.season} · ${p.range}` };
+		})
+	);
+
+	let villages = $state.raw<GeoJSON.FeatureCollection | null>(null);
+	let showVillages = $state(true);
+	const villageBoxes = $derived.by(() => {
+		const out: [string, number, number, number, number][] = [];
+		for (const f of villages?.features ?? []) {
+			let [s, w, n, e] = [90, 180, -90, -180];
+			const walk = (c: unknown): void => {
+				if (typeof (c as number[])[0] !== 'number') {
+					for (const d of c as unknown[]) walk(d);
+					return;
+				}
+				const [x, y] = c as number[];
+				[s, w, n, e] = [Math.min(s, y), Math.min(w, x), Math.max(n, y), Math.max(e, x)];
+			};
+			walk((f.geometry as GeoJSON.Polygon | GeoJSON.MultiPolygon).coordinates);
+			out.push([String(f.properties?.code), s, w, n, e]);
+		}
+		return out;
+	});
+	const selectedCellRing = $derived.by(() => {
+		if (!selectedCellId || !grid) return null;
+		const f = grid.features.find((g) => g.properties?.cellId === selectedCellId);
+		const geom = f?.geometry;
+		if (geom?.type === 'Polygon') return geom.coordinates[0] as [number, number][];
+		if (geom?.type === 'MultiPolygon') return (geom.coordinates[0]?.[0] as [number, number][]) ?? null;
+		return null;
+	});
+	const plotCodeKey = $derived.by(() => {
+		if ((!showCrops && !waterFromSurvey) || crops.status !== 'done' || !selectedCellRing) return '';
+		let s = 90,
+			w = 180,
+			n = -90,
+			e = -180;
+		for (const [x, y] of selectedCellRing) {
+			s = Math.min(s, y);
+			n = Math.max(n, y);
+			w = Math.min(w, x);
+			e = Math.max(e, x);
+		}
+		return villageBoxes
+			.filter(([, vs, vw, vn, ve]) => vs <= n && vn >= s && vw <= e && ve >= w)
+			.map(([code]) => code)
+			.join(',');
+	});
+	const plotCodes = $derived(plotCodeKey ? plotCodeKey.split(',') : []);
+	$effect(() => {
+		const codes = plotCodes;
+		if (codes.length) untrack(() => crops.loadPlots(codes));
+	});
+	const cropPlotsOn = $derived(
+		Boolean(selectedCellId) && plotCodes.length > 0 && (showCrops || waterFromSurvey)
+	);
+	const cropPlots = $derived(cropPlotsOn ? crops.plotCollection(plotCodes, selectedCellRing) : null);
+	const cropPlotFills = $derived(cropPlotsOn ? crops.plotFills(plotCodes) : new Map<string, string>());
+	let selectedCropPlot = $state<string | null>(null);
+	$effect(() => {
+		if (!showCrops && !waterFromSurvey) selectedCropPlot = null;
+	});
+	const surveyHudNote = $derived(
+		cropPlotsOn
+			? 'Parcels take the colour of their largest crop.'
+			: 'Click a cell to colour cadastral parcels from the crop survey.'
+	);
+
+	const cellFills = $derived(
+		waterFromGapi
+			? waterFills
+			: (showCrops || waterFromSurvey) && crops.status === 'done' && !cropPlotsOn && crops.fills.size
+				? crops.fills
+				: null
+	);
+	const cellTooltip = (id: string) =>
+		showCrops || waterFromSurvey ? crops.tooltip(id) : waterTooltip(id);
 	const smRaster = $derived(showSm ? soil.frame : null);
 	let etPanelHidden = $state(false);
 	const etCellValue = $derived(etMonth ? (etSeries?.find((p) => p.month === etMonth) ?? null) : null);
@@ -338,6 +513,28 @@
 		};
 	});
 
+	const landscapeCrops = $derived.by(() => {
+		if (!data) return [];
+		const counts = new Map<string, number>();
+		for (const f of data.features) {
+			if (f.properties?.alu_type !== 'field') continue;
+			const crop = fieldSeasonCrop(f.properties.monitoring_prediction, water.seasonKey) ?? 'NO_PREDICTION';
+			counts.set(crop, (counts.get(crop) ?? 0) + 1);
+		}
+		return [...counts]
+			.sort((a, b) => b[1] - a[1])
+			.map(([crop, n]) => ({ crop, n, label: formatCropLabel(crop), color: cropColor(crop) }));
+	});
+	const landscapeHudLegend = $derived(
+		landscapeCrops.length
+			? landscapeCrops.slice(0, 8).map((r) => ({
+					color: r.color,
+					label: r.label,
+					count: r.n.toLocaleString('en-IN')
+				}))
+			: CROP_SWATCHES.slice(0, 8).map((s) => ({ color: s.color, label: s.label }))
+	);
+
 	onMount(async () => {
 		try {
 			const [g, b] = await Promise.all([
@@ -361,6 +558,10 @@
 		fetch('/fwa-api/tlab/layers/canals')
 			.then((r) => (r.ok ? r.json() : null))
 			.then((c) => (canals = c))
+			.catch(() => {});
+		fetch('/fwa-api/tlab/layers/villages')
+			.then((r) => (r.ok ? r.json() : null))
+			.then((v) => (villages = v))
 			.catch(() => {});
 		wucs = await fetch(`${DPRVI_BASE}/wucs_boundary.geojson`)
 			.then((r) => (r.ok ? r.json() : null))
@@ -466,8 +667,10 @@
 	function selectCell(cellId: string) {
 		if (cellId === selectedCellId && (data || loading)) return;
 		selectedCellId = cellId;
+		selectedCropPlot = null;
 		etPanelHidden = false;
 		smPanelHidden = false;
+		cropPanelHidden = false;
 		loadedDate = null;
 		void loadCell(cellId);
 		void loadDates(cellId);
@@ -484,6 +687,7 @@
 		datesError = null;
 		loadedDate = null;
 		selectedFeature = null;
+		selectedCropPlot = null;
 		loading = false;
 		fetchError = null;
 		water.clearCell();
@@ -513,18 +717,24 @@
 	<title>T-Lab · Farm Water Accounting</title>
 </svelte:head>
 
-{#snippet sources(items: LayerSource[])}
-	<p class="tlab-source">
-		<span>Source</span>
-		{#each items as s, i}
-			{#if i}<span aria-hidden="true">·</span>{/if}
-			{#if s.href}
-				<a href={s.href} target="_blank" rel="noopener noreferrer">{s.label}</a>
-			{:else}
-				<span>{s.label}</span>
-			{/if}
-		{/each}
-	</p>
+{#snippet sources(key: string)}
+	<div class="tlab-cite">
+		<p class="tlab-source">
+			<span>Resolution</span>
+			<span>{RESOLUTION[key]}</span>
+		</p>
+		<p class="tlab-source">
+			<span>Source</span>
+			{#each SOURCES[key] as s, i}
+				{#if i}<span aria-hidden="true">·</span>{/if}
+				{#if s.href}
+					<a href={s.href} target="_blank" rel="noopener noreferrer">{s.label}</a>
+				{:else}
+					<span>{s.label}</span>
+				{/if}
+			{/each}
+		</p>
+	</div>
 {/snippet}
 
 <div class="tlab">
@@ -655,7 +865,7 @@
 						day: 'numeric',
 						month: 'short',
 						year: 'numeric'
-					})}, totalled with the crop water budgets. Pick the year and season on the map; click a cell for its plots.
+					})}, totalled with the crop water budgets. Pick year, season and crop source on the map; click a cell for its plots.
 				</p>
 			{/if}
 			{#if water.failedCells > 0}
@@ -674,6 +884,10 @@
 						<p class="tlab-muted tlab-xs">Click a cell to see its plots by crop, overall and individual plot.</p>
 					{:else if !showWater}
 						<p class="tlab-muted tlab-xs">Select this layer to see this cell's water budget.</p>
+					{:else if waterFromSurvey}
+						<p class="tlab-muted tlab-xs">
+							Grid colouring uses the crop survey. Click a cell for cadastral parcels; switch to Google ALU for water need in m³.
+						</p>
 					{:else if !water.cellIds.has(selectedCellId)}
 						<p class="tlab-muted tlab-xs">No water budget for this cell.</p>
 					{:else if water.cellLoading}
@@ -693,7 +907,7 @@
 					{/if}
 				</div>
 			{/if}
-			{@render sources(SOURCES.water)}
+			{@render sources('water')}
 		</TLabSection>
 
 		<TLabSection
@@ -731,12 +945,17 @@
 					</li>
 				{/each}
 			</ul>
-			{@render sources(SOURCES.landscape)}
+			{#if data}
+				<p class="tlab-muted tlab-xs tlab-mt">
+					Farm plots coloured by Google's predicted crop. Year, season and legend are on the map.
+				</p>
+			{/if}
+			{@render sources('landscape')}
 		</TLabSection>
 
 		<TLabSection
 			title="Evapotranspiration"
-			subtitle="NRSC NHP · monthly actual ET, 750 m"
+			subtitle="NRSC Bhuvan NHP · monthly actual ET, 750 m"
 			swatch="linear-gradient(135deg, #ffffa0, #47de31, #203a77)"
 			exclusive
 			on={showEt}
@@ -744,9 +963,9 @@
 			bind:open={openSec.et}
 		>
 			{#if etRangeError}
-				<p class="tlab-status tlab-error">Bhuvan ET service unavailable: {etRangeError}</p>
+				<p class="tlab-status tlab-error">ET service unavailable: {etRangeError}</p>
 			{:else if !etRange || !etMonth}
-				<p class="tlab-muted tlab-xs">Checking latest Bhuvan ET layer…</p>
+				<p class="tlab-muted tlab-xs">Checking latest ET layer…</p>
 			{:else}
 				<div class="tlab-snap-head">
 					<span class="tlab-snap-title">Month</span>
@@ -825,14 +1044,15 @@
 					{/if}
 				</div>
 				<p class="tlab-muted tlab-xs tlab-mt">
-					Energy-balance ET from SNPP-VIIRS, clipped to the district. White pixels are cloud.
+					NRSC Bhuvan National Hydrology Project actual ET (SNPP-VIIRS energy balance), monthly mean of
+					daily AET at 750 m.
 				</p>
 			{/if}
-			{@render sources(SOURCES.et)}
+			{@render sources('et')}
 		</TLabSection>
 
 		<TLabSection
-			title="Soil moisture"
+			title="Relative soil moisture"
 			subtitle="Sentinel-1 radar · 250 m · every 6–12 days{soil.latest ? ` · to ${formatDay(soil.latest)}` : ''}"
 			swatch="linear-gradient(135deg, {SM_PALETTE[1]}, {SM_PALETTE[4]}, {SM_PALETTE[7]})"
 			exclusive
@@ -842,11 +1062,11 @@
 		>
 			{#if soil.status === 'error'}
 				<p class="tlab-status tlab-error">
-					Soil moisture layer unavailable: {soil.error}
+					Relative soil moisture layer unavailable: {soil.error}
 					<button type="button" class="tlab-link" onclick={() => soil.load()}>Try again</button>
 				</p>
 			{:else if soil.status !== 'done' || !soil.pass}
-				<p class="tlab-muted tlab-xs">{showSm ? 'Loading Sentinel-1 soil moisture…' : 'Select this layer to load soil moisture.'}</p>
+				<p class="tlab-muted tlab-xs">{showSm ? 'Loading Sentinel-1 relative soil moisture…' : 'Select this layer to load relative soil moisture.'}</p>
 			{:else}
 				<div class="tlab-snap-head">
 					<span class="tlab-snap-title">Satellite pass</span>
@@ -915,7 +1135,7 @@
 				<div class="tlab-subcard">
 					<div class="tlab-subcard-title">Selected cell</div>
 					{#if !selectedCellId}
-						<p class="tlab-muted tlab-xs">Click a cell for its soil moisture stats and history.</p>
+						<p class="tlab-muted tlab-xs">Click a cell for its relative soil moisture stats and history.</p>
 					{:else}
 						<dl class="tlab-summary">
 							<div>
@@ -931,18 +1151,142 @@
 						</dl>
 						{#if smPanelHidden}
 							<button type="button" class="tlab-link tlab-mt" onclick={() => (smPanelHidden = false)}>
-								Open soil moisture stats and time series
+								Open relative soil moisture stats and time series
 							</button>
 						{/if}
 					{/if}
 				</div>
 				<p class="tlab-muted tlab-xs tlab-mt">
-					Change detection on Sentinel-1 radar backscatter (VV), as in Copernicus's Sentinel-1 soil moisture
-					products. It is relative to each spot's own range, not a volumetric reading; crop canopy and flooded
-					paddies also change the signal.
+					Change detection on Sentinel-1 VV backscatter (10 m RTC from Planetary Computer, averaged to
+					250 m). Wetness is relative to each spot's own dry–wet range, not a volumetric reading; crop
+					canopy and flooded paddies also change the signal.
 				</p>
 			{/if}
-			{@render sources(SOURCES.sm)}
+			{@render sources('sm')}
+		</TLabSection>
+
+		<TLabSection
+			title="Crop survey"
+			subtitle="Karnataka crop survey · crop area per cell and parcel{crops.seasons.length ? ` · ${crops.seasons[0].label} to ${crops.seasons.at(-1)?.label}` : ''}"
+			swatch="linear-gradient(135deg, #b45309, #db2777, #2563eb)"
+			exclusive
+			on={showCrops}
+			onToggle={(v) => setDataLayer('crops', v)}
+			bind:open={openSec.crops}
+		>
+			{#if crops.status === 'error'}
+				<p class="tlab-status tlab-error">
+					Crop survey layer unavailable: {crops.error}
+					<button type="button" class="tlab-link" onclick={() => crops.load()}>Try again</button>
+				</p>
+			{:else if crops.status !== 'done' || !crops.season}
+				<p class="tlab-muted tlab-xs">{showCrops ? 'Loading crop survey…' : 'Select this layer to load the crop survey.'}</p>
+			{:else}
+				<p class="tlab-muted tlab-xs">
+					{#if crops.season.villages.total}
+						{crops.season.villages.withData} of {crops.season.villages.total} villages ·
+						{fmtHa(crops.districtTotal)} ha surveyed{#if crops.collecting}{' '}·
+							still collecting{/if}
+					{:else}
+						Parcel records from the Raichur crop survey scrape. Click a cell to load them.
+					{/if}
+					Year, season and legend are on the map.
+				</p>
+
+				<div class="tlab-snap-head tlab-mt">
+					<span class="tlab-snap-title">Colour cells by</span>
+					<select
+						class="tlab-date"
+						aria-label="Colour cells by"
+						value={crops.focus ?? ''}
+						onchange={(e) => (crops.focus = e.currentTarget.value === '' ? null : Number(e.currentTarget.value))}
+					>
+						<option value="">Main crop</option>
+						{#each crops.district.filter((a) => !a.group.idle) as a (a.group.id)}<option value={a.group.id}>{cropText(a.group)} area</option>{/each}
+					</select>
+				</div>
+
+				{#if cropFocus}
+					<div class="tlab-legend">
+						<div class="tlab-classes">
+							{#each focusRamp(cropFocus.color) as c}<span style:background={c}></span>{/each}
+						</div>
+						<div class="tlab-water-ticks tlab-xs tlab-muted">
+							{#each FOCUS_BREAKS.slice(0, -1) as b, i}<span style:left="{((i + 1) / FOCUS_BREAKS.length) * 100}%">{b}</span>{/each}
+						</div>
+						<p class="tlab-muted tlab-xs">
+							{#if cropPlotsOn}{cropText(cropFocus)} share of each parcel, lightest under 20% to darkest over 80%.{:else}{cropText(cropFocus)}, hectares per cell (about 1.3 km²).{/if}
+						</p>
+					</div>
+				{:else}
+					<ul class="tlab-crop-key tlab-xs">
+						{#each crops.district.filter((a) => !a.group.idle).slice(0, 10) as a (a.group.id)}
+							{@const kn = primaryKn(a.group)}
+							<li>
+								<button type="button" class="tlab-layer-name" onclick={() => (crops.focus = a.group.id)} title="Map {cropText(a.group)} area">
+									<span class="tlab-swatch-lg" style:background={a.group.color}></span>
+									<span class="tlab-crop-label">
+										{#if kn}<span class="tlab-kn">{kn}</span>{/if}
+										<span class="tlab-en">{a.group.name}</span>
+									</span>
+								</button>
+								<span class="tlab-count">{fmtHa(a.ha)} ha</span>
+							</li>
+						{/each}
+					</ul>
+					<p class="tlab-muted tlab-xs">
+						{#if cropPlotsOn}
+							Each parcel takes the colour of its largest crop; click a crop to map its share.
+						{:else}
+							District totals from the Raichur scrape. Click a cell to colour its parcels.
+						{/if}
+					</p>
+				{/if}
+
+				<p class="tlab-muted tlab-xs tlab-mt">
+					{#if !selectedCellId}
+						Click a grid cell to load its cadastral parcels and crop survey records.
+					{:else if !plotCodes.length}
+						No village cadastral map overlaps this cell.
+					{:else if !crops.plotsLoaded(plotCodes)}
+						Loading cadastral parcels and crop survey rows for this cell…
+					{:else}
+						Showing {cropPlots?.features.length.toLocaleString('en-IN') ?? 0} parcels in this cell.
+						Click a parcel for its crops and year-by-year trend.
+					{/if}
+				</p>
+
+				<div class="tlab-subcard">
+					<div class="tlab-subcard-title">Selected cell</div>
+					{#if !selectedCellId}
+						<p class="tlab-muted tlab-xs">Click a cell for its crops this season and across every season.</p>
+					{:else}
+						{@const cellAreas =
+							crops.plotsLoaded(plotCodes) && selectedCellRing
+								? crops.plotCellAreas(plotCodes, selectedCellRing)
+								: []}
+						{@const main = crops.main(cellAreas)}
+						<dl class="tlab-summary">
+							<div>
+								<dt>Main crop</dt>
+								<dd>{#if main}<span class="tlab-sm-chip" style:background={main.group.color}></span>{cropText(main.group)}{:else}<span class="tlab-unit">No records</span>{/if}</dd>
+							</div>
+							<div>
+								<dt>Surveyed</dt>
+								<dd>{fmtHa(cellAreas.reduce((s, a) => s + a.ha, 0))} <span class="tlab-unit">ha</span></dd>
+							</div>
+						</dl>
+					{/if}
+				</div>
+				{#if cropPanelHidden}
+					<button type="button" class="tlab-link tlab-mt" onclick={() => (cropPanelHidden = false)}>Open crop survey stats</button>
+				{/if}
+				<p class="tlab-muted tlab-xs tlab-mt">
+					Crops are the Raichur FRUITS scrape (raichur_raw on S3). Outlines are KGIS cadastral parcels.
+					Pick a year and season on the map. Owner names are not kept.
+				</p>
+			{/if}
+			{@render sources('crops')}
 		</TLabSection>
 
 		<div class="tlab-group-label">Overlays</div>
@@ -966,7 +1310,21 @@
 					<span>TLBC D-95 WUCS boundaries</span>
 				</label>
 			{/if}
-			{@render sources(SOURCES.boundaries)}
+			{@render sources('boundaries')}
+		</TLabSection>
+
+		<TLabSection
+			title="Villages"
+			subtitle="Village boundaries{villages ? ` · ${villages.features.length.toLocaleString('en-IN')}` : ''}"
+			swatch="#e2e8f0"
+			on={showVillages}
+			onToggle={(v) => (showVillages = v)}
+			bind:open={openSec.villages}
+		>
+			<p class="tlab-muted tlab-xs">
+				{villages ? 'Revenue village outlines; names appear when zoomed in.' : 'Loading village boundaries…'}
+			</p>
+			{@render sources('villages')}
 		</TLabSection>
 
 		<TLabSection
@@ -985,7 +1343,7 @@
 			{:else}
 				<p class="tlab-muted tlab-xs">Loading canals…</p>
 			{/if}
-			{@render sources(SOURCES.canals)}
+			{@render sources('canals')}
 		</TLabSection>
 
 		<TLabSection
@@ -996,7 +1354,7 @@
 			bind:open={openSec.grid}
 		>
 			<p class="tlab-muted tlab-xs">Cell outlines. Cells stay clickable when the grid is hidden.</p>
-			{@render sources(SOURCES.grid)}
+			{@render sources('grid')}
 		</TLabSection>
 
 		{#if geometryError}
@@ -1023,13 +1381,13 @@
 			{showEt}
 			{etOpacity}
 			{cellFills}
-			cellTooltip={waterTooltip}
+			{cellTooltip}
 			raster={smRaster}
 			rasterLut={SM_LUT}
 			rasterLabel={smLabel}
 			rasterOpacity={smOpacity}
 			{waterPlots}
-			focusCover={!showWater && !showSm}
+			focusCover={!showWater && !showSm && !showCrops}
 			waterPlotColors={water.plotColors}
 			waterSelectedPlot={waterPlots ? water.selectedPlot : null}
 			waterSelectedCrop={waterPlots && water.viewMode === 'group' ? water.selectedCrop : null}
@@ -1037,6 +1395,18 @@
 			selectedFeatureId={selectedFeature?.id != null ? String(selectedFeature.id) : null}
 			onCellSelect={selectCell}
 			onFeatureSelect={(f) => (selectedFeature = f)}
+			{villages}
+			{showVillages}
+			{cropPlots}
+			{cropPlotFills}
+			cropPlotTooltip={(pid) => crops.plotTooltip(pid)}
+			{selectedCropPlot}
+			fieldCropSeason={showLandscape ? water.seasonKey || null : null}
+			onCropPlotSelect={(pid) => {
+				selectedCropPlot = pid;
+				cropPanelHidden = false;
+				if (showCrops) openSec.crops = true;
+			}}
 		/>
 			{#snippet failed(error, reset)}
 				<div class="tlab-map-failed">
@@ -1058,7 +1428,67 @@
 			</div>
 		{/if}
 		{#if showWater && water.status === 'done'}
-			<TLabWaterControls {water} />
+			<TLabWaterControls
+				{water}
+				source={waterCropSource}
+				onSource={setWaterCropSource}
+				surveyYears={cropYears}
+				surveyYear={crops.season?.year ?? null}
+				onSurveyYear={setSurveyYear}
+				surveySeasons={surveyHudSeasons}
+				surveySeasonKey={crops.seasonKey}
+				onSurveySeason={setSurveySeason}
+				surveyLegend={surveyHudLegend}
+				surveyNote={surveyHudNote}
+				surveyReady={crops.status === 'done'}
+			/>
+		{:else if showLandscape && water.status === 'done'}
+			<TLabMapHud
+				title="Field landscape"
+				years={water.years}
+				year={landscapeYear}
+				onYear={(y) => water.setYear(y)}
+				seasons={landscapeSeasons}
+				seasonKey={water.seasonKey || null}
+				onSeason={(k) => water.setSeason(k)}
+				legendItems={landscapeHudLegend}
+				legendNote={data
+					? `Farm plots coloured by Google's predicted crop${water.seasonKey ? ` · ${water.seasonKey}` : ''}.`
+					: 'Same crop colours as the crop survey and water budget. Click a cell to colour its farm plots.'}
+			/>
+		{:else if showCrops && crops.status === 'done' && crops.season}
+			<TLabMapHud
+				title="Crop survey"
+				years={cropYears}
+				year={crops.season.year}
+				onYear={setCropYear}
+				seasons={surveyHudSeasons}
+				seasonKey={crops.seasonKey}
+				onSeason={(k) => (crops.seasonKey = k)}
+				legendItems={cropFocus ? [] : surveyHudLegend}
+				rampColors={cropFocus ? focusRamp(cropFocus.color) : []}
+				rampTicks={cropFocus ? FOCUS_BREAKS.slice(0, -1).map(String) : []}
+				legendNote={cropFocus
+					? cropPlotsOn
+						? `${cropText(cropFocus)} share of each parcel.`
+						: `${cropText(cropFocus)}, hectares per cell.`
+					: surveyHudNote}
+			>
+				{#snippet extra()}
+					<label class="grow">
+						<span>Colour by</span>
+						<select
+							value={crops.focus ?? ''}
+							onchange={(e) => (crops.focus = e.currentTarget.value === '' ? null : Number(e.currentTarget.value))}
+						>
+							<option value="">Main crop</option>
+							{#each crops.district.filter((a) => !a.group.idle) as a (a.group.id)}
+								<option value={a.group.id}>{cropText(a.group)} area</option>
+							{/each}
+						</select>
+					</label>
+				{/snippet}
+			</TLabMapHud>
 		{/if}
 		{#if loading}
 			<div class="tlab-map-loading">Fetching live data…</div>
@@ -1073,6 +1503,7 @@
 				<TLabFeaturePanel
 					feature={selectedFeature}
 					cellToken={selectedToken}
+					seasonKey={water.seasonKey || null}
 					onClose={() => (selectedFeature = null)}
 				/>
 				{#snippet failed()}
@@ -1117,7 +1548,25 @@
 			<svelte:boundary onerror={(e) => reportError(e instanceof Error ? (e.stack ?? e.message) : String(e))}>
 				<TLabSmPanel {soil} cellId={selectedCellId} cellToken={selectedToken} onClose={() => (smPanelHidden = true)} />
 				{#snippet failed()}
-					<p class="tlab-status tlab-error">Could not show this cell's soil moisture.</p>
+					<p class="tlab-status tlab-error">Could not show this cell's relative soil moisture.</p>
+				{/snippet}
+			</svelte:boundary>
+		</div>
+	{:else if (showCrops || (waterFromSurvey && selectedCellId)) && crops.status === 'done' && crops.season && !cropPanelHidden}
+		<div class="tlab-panel-wrap">
+			<svelte:boundary onerror={(e) => reportError(e instanceof Error ? (e.stack ?? e.message) : String(e))}>
+				<TLabCropPanel
+					{crops}
+					cellId={selectedCellId}
+					cellToken={selectedToken}
+					plotId={selectedCropPlot}
+					{plotCodes}
+					cellRing={selectedCellRing}
+					onClearPlot={() => (selectedCropPlot = null)}
+					onClose={() => (cropPanelHidden = true)}
+				/>
+				{#snippet failed()}
+					<p class="tlab-status tlab-error">Could not show the crop survey statistics.</p>
 				{/snippet}
 			</svelte:boundary>
 		</div>
@@ -1294,13 +1743,20 @@
 		margin-left: 0.3rem;
 	}
 
+	.tlab-cite {
+		margin: 0.7rem 0 0;
+		padding-top: 0.5rem;
+		border-top: 1px dashed #00296b1a;
+		display: flex;
+		flex-direction: column;
+		gap: 0.2rem;
+	}
+
 	.tlab-source {
 		display: flex;
 		flex-wrap: wrap;
 		gap: 0.15rem 0.3rem;
-		margin: 0.7rem 0 0;
-		padding-top: 0.5rem;
-		border-top: 1px dashed #00296b1a;
+		margin: 0;
 		font-size: 0.66rem;
 		line-height: 1.4;
 		color: #00296b99;
@@ -1402,6 +1858,56 @@
 		box-shadow: inset 0 0 0 1px #cbd5e1;
 		margin-right: 0.2rem;
 		vertical-align: -0.05rem;
+	}
+
+	.tlab-crop-pick {
+		display: flex;
+		gap: 0.3rem;
+	}
+
+	.tlab-crop-key {
+		list-style: none;
+		margin: 0.4rem 0;
+		padding: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 0.2rem;
+	}
+
+	.tlab-crop-key li {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.5rem;
+	}
+
+	.tlab-crop-key .tlab-swatch-lg {
+		margin-right: 0.4rem;
+		align-self: flex-start;
+		margin-top: 0.2rem;
+	}
+
+	.tlab-crop-label {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-start;
+		line-height: 1.2;
+		min-width: 0;
+	}
+
+	.tlab-kn {
+		font-weight: 600;
+	}
+
+	.tlab-en {
+		font-size: 0.68rem;
+		font-weight: 500;
+		color: color-mix(in srgb, #00296b 55%, white);
+	}
+
+	.tlab-crop-key .tlab-layer-name {
+		display: flex;
+		align-items: flex-start;
 	}
 
 	.tlab-date {

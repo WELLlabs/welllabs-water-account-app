@@ -1,7 +1,8 @@
-"""T-Lab layers (district boundary, canal network, water need per cell, soil moisture) read from the project S3 bucket.
+"""T-Lab layers (district boundary, canal network, water need per cell, soil moisture, crop survey) read from the project S3 bucket.
 
-Object keys come from TLAB_BOUNDARY_KEY, TLAB_CANALS_KEY, TLAB_WATER_KEY, TLAB_SM_KEY and
-TLAB_SM_PREFIX (soil moisture frames) in the environment.
+Object keys come from TLAB_BOUNDARY_KEY, TLAB_CANALS_KEY, TLAB_WATER_KEY, TLAB_SM_KEY,
+TLAB_SM_PREFIX (soil moisture frames), TLAB_CROPS_KEY, TLAB_VILLAGES_KEY and
+TLAB_PLOTS_PREFIX (crop survey parcels per village) in the environment.
 
 Sources stay in the bucket in their native CRS; each request gets a WGS84 GeoJSON
 conversion held in memory and revalidated against the object's ETag every
@@ -163,7 +164,16 @@ LAYERS = {
     "water": _Layer("TLAB_WATER_KEY", lambda raw: raw, "application/json", "gzip"),
     # Sentinel-1 surface soil moisture written by scripts/build_tlab_sm.py
     "sm": _Layer("TLAB_SM_KEY", lambda raw: raw, "application/json", "gzip", "Raichur_soil_moisture.json.gz"),
+    # Karnataka crop survey totals per season, village and cell written by scripts/build_tlab_crops.py
+    "crops": _Layer("TLAB_CROPS_KEY", lambda raw: raw, "application/json", "gzip", "Raichur_crop_survey.json.gz"),
+    # KGIS village outlines written by scripts/build_tlab_plots.py
+    "villages": _Layer("TLAB_VILLAGES_KEY", lambda raw: raw, "application/geo+json", "gzip", "Raichur_villages.geojson.gz"),
 }
+
+PLOTS_PREFIX = os.environ.get("TLAB_PLOTS_PREFIX", "Raichur_crop_plots/")
+PLOTS_CACHE = 200
+_plots: dict[str, _Layer] = {}
+_plots_lock = threading.Lock()
 
 SM_PREFIX = os.environ.get("TLAB_SM_PREFIX", "Raichur_soil_moisture/")
 SM_FRAME_CACHE = 64
@@ -190,6 +200,22 @@ def sm_frame(date: str, request: Request):
     except ValueError:
         raise HTTPException(status_code=404, detail="Unknown date") from None
     return _respond(_sm_frame(date), request)
+
+
+@router.get("/plots/{village}.json")
+def village_plots(village: str, request: Request):
+    """Cadastral parcels of one village with crop survey crops, written by scripts/build_tlab_plots.py."""
+    if not (len(village) == 10 and village.isdigit()):
+        raise HTTPException(status_code=404, detail="Unknown village")
+    with _plots_lock:
+        entry = _plots.pop(village, None)
+        if entry is None:
+            entry = _Layer("TLAB_PLOTS_PREFIX", lambda raw: raw, "application/json", "gzip")
+            entry.key = f"{PLOTS_PREFIX}{village}.json"
+        _plots[village] = entry
+        while len(_plots) > PLOTS_CACHE:
+            _plots.pop(next(iter(_plots)))
+    return _respond(entry, request)
 
 
 @router.get("/{name}")

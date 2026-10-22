@@ -255,7 +255,7 @@
 
 		<section>
 			<p class="muted">
-				NRSC NHP energy-balance actual ET from SNPP-VIIRS, 750 m, sampled at the centre of this cell.
+				NRSC Bhuvan NHP actual ET (SNPP-VIIRS energy balance), 750 m, sampled at the centre of this cell.
 			</p>
 		</section>
 	{/if}

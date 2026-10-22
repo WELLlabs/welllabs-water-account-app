@@ -1,52 +1,90 @@
 <script lang="ts">
 	import { formatCalendarMonth } from '$lib/waterBudget';
 	import { WATER_EMPTY, WATER_PALETTE, compactM3, seasonParts, type TLabWater } from '$lib/tlabWater.svelte';
+	import TLabMapHud, { type HudKeyItem, type HudSeason } from './TLabMapHud.svelte';
+
+	export type WaterCropSource = 'gapi' | 'survey';
 
 	interface Props {
 		water: TLabWater;
+		source: WaterCropSource;
+		onSource: (source: WaterCropSource) => void;
+		surveyYears: number[];
+		surveyYear: number | null;
+		onSurveyYear: (year: number) => void;
+		surveySeasons: HudSeason[];
+		surveySeasonKey: string | null;
+		onSurveySeason: (key: string) => void;
+		surveyLegend: HudKeyItem[];
+		surveyNote: string;
+		surveyReady: boolean;
 	}
 
-	let { water }: Props = $props();
+	let {
+		water,
+		source,
+		onSource,
+		surveyYears,
+		surveyYear,
+		onSurveyYear,
+		surveySeasons,
+		surveySeasonKey,
+		onSurveySeason,
+		surveyLegend,
+		surveyNote,
+		surveyReady
+	}: Props = $props();
 
-	let collapsed = $state(false);
-
-	const year = $derived(water.seasonKey ? seasonParts(water.seasonKey).year : null);
+	const survey = $derived(source === 'survey');
+	const year = $derived(survey ? surveyYear : water.seasonKey ? seasonParts(water.seasonKey).year : null);
+	const years = $derived(survey ? surveyYears : water.years);
+	const seasons = $derived.by((): HudSeason[] => {
+		if (survey) return surveySeasons;
+		if (year == null) return [];
+		return water.seasonsForYear(year).map((s) => {
+			const p = seasonParts(s.key);
+			const plots =
+				s.plots != null
+					? ` · ${s.plots.toLocaleString('en', { notation: 'compact', maximumFractionDigits: 1 })} plots`
+					: '';
+			return { key: s.key, label: `${p.season} · ${p.range}${plots}` };
+		});
+	});
+	const seasonKey = $derived(survey ? surveySeasonKey : water.seasonKey || null);
 	const totals = $derived(water.totals);
 
-	function plotCount(n: number | undefined): string {
-		if (n == null) return '';
-		return ` · ${n.toLocaleString('en', { notation: 'compact', maximumFractionDigits: 1 })} plots`;
+	function setYear(y: number) {
+		if (survey) onSurveyYear(y);
+		else water.setYear(y);
+	}
+
+	function setSeason(key: string) {
+		if (survey) onSurveySeason(key);
+		else water.setSeason(key);
 	}
 </script>
 
-<div class="ctl" class:collapsed role="region" aria-label="Water budget season and legend">
-	<div class="head">
-		<span class="title">Water budget</span>
-		<button type="button" class="toggle" onclick={() => (collapsed = !collapsed)} aria-expanded={!collapsed}>
-			{collapsed ? 'Show' : 'Hide'}
-		</button>
-	</div>
+<TLabMapHud
+	title="Water budget"
+	{years}
+	{year}
+	onYear={setYear}
+	{seasons}
+	{seasonKey}
+	onSeason={setSeason}
+>
+	{#snippet extra()}
+		<label class="grow">
+			<span>Crops on the map</span>
+			<select value={source} onchange={(e) => onSource(e.currentTarget.value as WaterCropSource)}>
+				<option value="gapi">Google ALU</option>
+				<option value="survey">Crop survey</option>
+			</select>
+		</label>
+	{/snippet}
 
-	{#if !collapsed && water.seasons.length && water.seasonKey}
-		<div class="pick">
-			<label>
-				<span>Year</span>
-				<select value={year} onchange={(e) => water.setYear(Number(e.currentTarget.value))}>
-					{#each water.years as y}<option value={y}>{y}</option>{/each}
-				</select>
-			</label>
-			<label class="grow">
-				<span>Season</span>
-				<select value={water.seasonKey} onchange={(e) => water.setSeason(e.currentTarget.value)}>
-					{#each year != null ? water.seasonsForYear(year) : [] as s}
-						{@const p = seasonParts(s.key)}
-						<option value={s.key}>{p.season} · {p.range}{plotCount(s.plots)}</option>
-					{/each}
-				</select>
-			</label>
-		</div>
-
-		{#if totals}
+	{#snippet facts()}
+		{#if !survey && totals}
 			<dl class="facts">
 				<div>
 					<dt>Water needed</dt>
@@ -61,95 +99,43 @@
 					<dd>{totals.peak ? formatCalendarMonth(totals.peak.calendarMonth, totals.peak.calendarYear) : '—'}</dd>
 				</div>
 			</dl>
+		{:else if survey && !surveyReady}
+			<p class="note">Loading crop survey…</p>
 		{/if}
+	{/snippet}
 
-		<div class="legend">
-			<div class="classes">
-				<span style:background={WATER_EMPTY} title="No water need"></span>
-				{#each WATER_PALETTE as c}<span style:background={c}></span>{/each}
+	{#snippet legend()}
+		{#if survey}
+			{#if surveyLegend.length}
+				<ul class="key">
+					{#each surveyLegend as item}
+						<li>
+							<span class="sw" style:background={item.color}></span>
+							<span class="lab">{item.label}</span>
+							{#if item.count}<span class="n">{item.count}</span>{/if}
+						</li>
+					{/each}
+				</ul>
+			{/if}
+			{#if surveyNote}<p class="note">{surveyNote}</p>{/if}
+		{:else}
+			<div class="legend">
+				<div class="classes">
+					<span style:background={WATER_EMPTY} title="No water need"></span>
+					{#each WATER_PALETTE as c}<span style:background={c}></span>{/each}
+				</div>
+				<div class="ticks">
+					{#each [0, ...water.breaks] as b, i}
+						<span style:left="{((i + 1) / (WATER_PALETTE.length + 1)) * 100}%">{compactM3(b)}</span>
+					{/each}
+				</div>
+				<p>m³ per cell from Google ALU crops · equal-count classes · grey = no water need</p>
 			</div>
-			<div class="ticks">
-				{#each [0, ...water.breaks] as b, i}
-					<span style:left="{((i + 1) / (WATER_PALETTE.length + 1)) * 100}%">{compactM3(b)}</span>
-				{/each}
-			</div>
-			<p>m³ per cell · equal-count classes · grey = no water need</p>
-		</div>
-	{/if}
-</div>
+		{/if}
+	{/snippet}
+</TLabMapHud>
 
 <style>
-	.ctl {
-		position: absolute;
-		left: 0.75rem;
-		bottom: 2.2rem;
-		z-index: 800;
-		width: 19rem;
-		padding: 0.6rem 0.75rem 0.65rem;
-		border-radius: 0.6rem;
-		background: rgba(255, 255, 255, 0.96);
-		box-shadow: 0 4px 16px rgba(0, 41, 107, 0.18);
-		font-family: 'Montserrat', sans-serif;
-		color: #00296b;
-	}
-
-	.ctl.collapsed {
-		width: auto;
-	}
-
-	.head {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 0.75rem;
-	}
-
-	.title {
-		font-size: 0.78rem;
-		font-weight: 700;
-	}
-
-	.toggle {
-		border: none;
-		background: none;
-		padding: 0;
-		font: inherit;
-		font-size: 0.7rem;
-		font-weight: 600;
-		color: #1b75e0;
-		cursor: pointer;
-	}
-
-	.pick {
-		display: flex;
-		gap: 0.4rem;
-		margin-top: 0.5rem;
-	}
-
-	.pick label {
-		display: flex;
-		flex-direction: column;
-		gap: 0.15rem;
-		font-size: 0.64rem;
-		color: #00296b99;
-	}
-
-	.pick .grow {
-		flex: 1;
-		min-width: 0;
-	}
-
-	select {
-		width: 100%;
-		padding: 0.25rem 0.3rem;
-		border: 1px solid #00296b26;
-		border-radius: 0.35rem;
-		background: white;
-		font: inherit;
-		font-size: 0.72rem;
-		color: #00296b;
-	}
-
 	.facts {
 		display: grid;
 		grid-template-columns: 1.2fr 1fr 0.9fr;
@@ -166,6 +152,7 @@
 		margin: 0.1rem 0 0;
 		font-size: 0.8rem;
 		font-weight: 700;
+		color: #00296b;
 	}
 
 	dd small {
@@ -203,9 +190,49 @@
 		white-space: nowrap;
 	}
 
-	.legend p {
+	.legend p,
+	.note {
 		margin: 0.2rem 0 0;
 		font-size: 0.6rem;
 		color: #00296b99;
+	}
+
+	.key {
+		list-style: none;
+		margin: 0.55rem 0 0;
+		padding: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 0.18rem;
+		max-height: 9.5rem;
+		overflow: auto;
+	}
+
+	.key li {
+		display: flex;
+		align-items: baseline;
+		gap: 0.4rem;
+		font-size: 0.68rem;
+		color: #00296b;
+	}
+
+	.sw {
+		width: 0.65rem;
+		height: 0.65rem;
+		border-radius: 0.12rem;
+		flex-shrink: 0;
+		box-shadow: inset 0 0 0 1px #00296b22;
+		translate: 0 0.08rem;
+	}
+
+	.lab {
+		flex: 1;
+		min-width: 0;
+		line-height: 1.25;
+	}
+
+	.n {
+		color: #00296b99;
+		font-variant-numeric: tabular-nums;
 	}
 </style>
