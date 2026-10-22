@@ -1,19 +1,120 @@
 <script lang="ts">
-	import { ET_COLORS, type EtPoint } from '$lib/tlab';
+	import {
+		ET_COLORS,
+		PCP_COLORS,
+		NPP_COLORS,
+		TBP_COLORS,
+		GBWP_COLORS,
+		pcpColor,
+		nppColor,
+		tbpColor,
+		gbwpColor,
+		type EtPoint
+	} from '$lib/tlab';
+
+	export type HydroPanelMode = 'et' | 'rain' | 'npp' | 'biomass' | 'wp';
 
 	interface Props {
 		cellToken: string | null;
-		/** Every month the layer covers, oldest first, as YYYY-MM */
+		/** Every period the layer covers, oldest first (YYYY-MM or YYYY) */
 		months: string[];
 		series: EtPoint[] | null;
 		loading: boolean;
 		error: string | null;
-		/** Index into `months` of the month shown on the map */
+		/** Index into `months` of the period shown on the map */
 		idx: number;
+		/** Footer attribution; NRSC by default, WaPOR when that layer is on */
+		sourceNote?: string;
+		mode?: HydroPanelMode;
 		onClose: () => void;
 	}
 
-	let { cellToken, months, series, loading, error, idx = $bindable(), onClose }: Props = $props();
+	let {
+		cellToken,
+		months,
+		series,
+		loading,
+		error,
+		idx = $bindable(),
+		sourceNote = 'NRSC Bhuvan NHP actual ET (SNPP-VIIRS energy balance), 750 m, sampled at the centre of this cell.',
+		mode = 'et',
+		onClose
+	}: Props = $props();
+
+	const spec = $derived(
+		{
+			et: {
+				title: 'Evapotranspiration',
+				noun: 'actual ET',
+				unit: 'mm/day',
+				unitMonth: 'mm',
+				palette: ET_COLORS,
+				color: (v: number | null) =>
+					v == null ? '#cbd5e1' : ET_COLORS[Math.min(ET_COLORS.length - 1, Math.max(0, Math.floor(v)))],
+				format: (v: number) => v.toFixed(2),
+				yMin: 8,
+				yStep: 2,
+				temporal: 'month' as const,
+				dual: true
+			},
+			rain: {
+				title: 'Precipitation',
+				noun: 'rainfall',
+				unit: 'mm',
+				unitMonth: 'mm',
+				palette: PCP_COLORS,
+				color: pcpColor,
+				format: (v: number) => v.toFixed(0),
+				yMin: 80,
+				yStep: 50,
+				temporal: 'month' as const,
+				dual: true
+			},
+			npp: {
+				title: 'Net primary production',
+				noun: 'NPP',
+				unit: 'gC/m²',
+				unitMonth: 'gC/m²',
+				palette: NPP_COLORS,
+				color: nppColor,
+				format: (v: number) => v.toFixed(1),
+				yMin: 40,
+				yStep: 20,
+				temporal: 'month' as const,
+				dual: false
+			},
+			biomass: {
+				title: 'Biomass',
+				noun: 'total biomass',
+				unit: 'kg/ha',
+				unitMonth: 'kg/ha',
+				palette: TBP_COLORS,
+				color: tbpColor,
+				format: (v: number) => Math.round(v).toLocaleString('en-IN'),
+				yMin: 4000,
+				yStep: 2000,
+				temporal: 'year' as const,
+				dual: false
+			},
+			wp: {
+				title: 'Water productivity',
+				noun: 'gross biomass WP',
+				unit: 'kg/m³',
+				unitMonth: 'kg/m³',
+				palette: GBWP_COLORS,
+				color: gbwpColor,
+				format: (v: number) => v.toFixed(2),
+				yMin: 1.5,
+				yStep: 0.5,
+				temporal: 'year' as const,
+				dual: false
+			}
+		}[mode]
+	);
+
+	const rain = $derived(mode === 'rain');
+	const annual = $derived(spec.temporal === 'year');
+	const palette = $derived(spec.palette);
 
 	const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 	const W = 320;
@@ -25,12 +126,35 @@
 		return new Date(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0).getDate();
 	}
 
-	function label(month: string): string {
-		return `${MONTHS[Number(month.slice(5, 7)) - 1]} ${month.slice(0, 4)}`;
+	function label(period: string): string {
+		if (period.length === 4) return period;
+		const m = Number(period.slice(5, 7));
+		if (!m) return period;
+		return `${MONTHS[m - 1]} ${period.slice(0, 4)}`;
 	}
 
 	function color(v: number | null): string {
-		return v == null ? '#cbd5e1' : ET_COLORS[Math.min(ET_COLORS.length - 1, Math.max(0, Math.floor(v)))];
+		return spec.color(v);
+	}
+
+	function monthTotal(v: number, month: string): number {
+		if (mode === 'et') return v * daysIn(month);
+		return v;
+	}
+
+	function daily(v: number, month: string): number {
+		if (mode === 'et') return v;
+		return v / daysIn(month);
+	}
+
+	function fmtPrimary(v: number): string {
+		return spec.format(v);
+	}
+
+	function fmtTick(t: number): string {
+		if (mode === 'biomass') return t >= 1000 ? `${Math.round(t / 1000)}k` : String(t);
+		if (mode === 'wp') return Number.isInteger(t) ? String(t) : t.toFixed(1);
+		return String(t);
 	}
 
 	const points = $derived.by(() => {
@@ -56,7 +180,7 @@
 			const year = p.month.slice(0, 4);
 			const y = out.get(year) ?? { year, n: 0, total: 0, sum: 0 };
 			y.n++;
-			y.total += p.value * daysIn(p.month);
+			y.total += monthTotal(p.value, p.month);
 			y.sum += p.value;
 			out.set(year, y);
 		}
@@ -74,12 +198,18 @@
 	);
 
 	const current = $derived(points[idx] ?? null);
-	const currentNorm = $derived(current ? climatology[Number(current.month.slice(5, 7)) - 1] : null);
+	const currentNorm = $derived(
+		annual
+			? (stats?.mean ?? null)
+			: current
+				? climatology[Number(current.month.slice(5, 7)) - 1]
+				: null
+	);
 	const vsNorm = $derived(
 		current?.value != null && currentNorm ? ((current.value - currentNorm) / currentNorm) * 100 : null
 	);
 
-	const yMax = $derived(Math.max(8, Math.ceil((stats?.peak.value ?? 0) / 2) * 2));
+	const yMax = $derived(Math.max(spec.yMin, Math.ceil((stats?.peak.value ?? 0) / spec.yStep) * spec.yStep));
 	const chart = $derived.by(() => {
 		const bw = (W - AXIS) / Math.max(1, points.length);
 		const bars = points.map((p, i) => ({
@@ -91,7 +221,7 @@
 		}));
 		const yearMarks = points
 			.map((p, i) => ({ p, i }))
-			.filter(({ p }) => p.month.endsWith('-01'))
+			.filter(({ p }) => annual || p.month.endsWith('-01'))
 			.map(({ p, i }) => ({ year: p.month.slice(0, 4), x: AXIS + i * bw }));
 		const step = yearMarks.length > 8 ? 2 : 1;
 		return { bars, yearMarks: yearMarks.filter((_, i) => i % step === 0 && _.x < W - 16) };
@@ -100,53 +230,73 @@
 	const gaps = $derived(points.length - valid.length);
 </script>
 
-<aside class="panel" aria-label="Evapotranspiration for the selected cell">
+<aside class="panel" aria-label="{spec.title} for the selected cell">
 	<header>
 		<div class="title">
-			<span class="sw" style:background="linear-gradient(135deg, {ET_COLORS[0]}, {ET_COLORS[4]}, {ET_COLORS[9]})"></span>
+			<span class="sw" style:background="linear-gradient(135deg, {palette[0]}, {palette[4]}, {palette[9]})"></span>
 			<div>
-				<h2>Evapotranspiration</h2>
-				<p class="meta">Cell {cellToken ?? '—'} · monthly actual ET at the cell centre</p>
+				<h2>{spec.title}</h2>
+				<p class="meta">
+					Cell {cellToken ?? '—'} · {annual ? 'annual' : 'monthly'} {spec.noun} at the cell centre
+				</p>
 			</div>
 		</div>
-		<button type="button" class="close" onclick={onClose} aria-label="Close evapotranspiration">×</button>
+		<button type="button" class="close" onclick={onClose} aria-label="Close {spec.title}">×</button>
 	</header>
 
-	{#if loading}
-		<section><p class="muted">Loading ET history for this cell…</p></section>
-	{:else if error}
+	{#if error}
 		<section><p class="err">{error}</p></section>
+	{:else if !stats && loading}
+		<section><p class="muted">Loading {spec.noun} history for this cell…</p></section>
 	{:else if !stats}
-		<section><p class="muted">No ET values for this cell.</p></section>
+		<section><p class="muted">No {spec.noun} values for this cell.</p></section>
 	{:else}
 		{#if current}
 			<section>
 				<h3>{label(current.month)}</h3>
 				<dl class="facts">
 					<div>
-						<dt>Daily ET</dt>
+						<dt>{spec.dual ? (rain ? 'Month total' : 'Daily ET') : annual ? (mode === 'wp' ? 'Annual GBWP' : 'Year total') : 'Month total'}</dt>
 						<dd class="big">
 							{#if current.value != null}
-								{current.value.toFixed(2)} <small class="inline">mm/day</small>
+								{fmtPrimary(current.value)}
+								<small class="inline">{spec.unit}</small>
 							{:else}
 								<small class="inline">{current.status === 'cloud' ? 'Cloud' : 'No data'}</small>
 							{/if}
 						</dd>
 					</div>
-					<div>
-						<dt>Month total</dt>
-						<dd class="big">
-							{#if current.value != null}
-								{Math.round(current.value * daysIn(current.month))} <small class="inline">mm</small>
-							{:else}—{/if}
-						</dd>
-					</div>
+					{#if spec.dual}
+						<div>
+							<dt>{rain ? 'Mean daily' : 'Month total'}</dt>
+							<dd class="big">
+								{#if current.value != null}
+									{rain
+										? daily(current.value, current.month).toFixed(2)
+										: Math.round(monthTotal(current.value, current.month))}
+									<small class="inline">{rain ? 'mm/day' : 'mm'}</small>
+								{:else}—{/if}
+							</dd>
+						</div>
+					{:else if !annual && current.value != null}
+						<div>
+							<dt>Mean daily</dt>
+							<dd class="big">
+								{daily(current.value, current.month).toFixed(2)}
+								<small class="inline">{spec.unit}/day</small>
+							</dd>
+						</div>
+					{/if}
 					<div class="wide">
-						<dt>Against the {MONTHS[Number(current.month.slice(5, 7)) - 1]} average</dt>
+						<dt>
+							{annual
+								? 'Against the long-term mean'
+								: `Against the ${MONTHS[Number(current.month.slice(5, 7)) - 1]} average`}
+						</dt>
 						<dd>
 							{#if vsNorm != null && currentNorm != null}
 								<span class:up={vsNorm > 0} class:down={vsNorm < 0}>{vsNorm > 0 ? '+' : ''}{vsNorm.toFixed(0)}%</span>
-								<small>Average {currentNorm.toFixed(2)} mm/day</small>
+								<small>Average {fmtPrimary(currentNorm)} {spec.unit}</small>
 							{:else}—{/if}
 						</dd>
 					</div>
@@ -155,13 +305,13 @@
 		{/if}
 
 		<section>
-			<h3>Monthly time series</h3>
-			<p class="muted">Click a bar to show that month on the map. Grey = cloud or no data.</p>
-			<svg class="chart" viewBox="0 0 {W} {H + 14}" role="img" aria-label="Monthly actual ET for the selected cell">
+			<h3>{annual ? 'Annual time series' : 'Monthly time series'}</h3>
+			<p class="muted">Click a bar to show that {annual ? 'year' : 'month'} on the map. Grey = no data.</p>
+			<svg class="chart" viewBox="0 0 {W} {H + 14}" role="img" aria-label="{annual ? 'Annual' : 'Monthly'} {spec.noun} for the selected cell">
 				{#each [0, yMax / 2, yMax] as t}
 					{@const y = H - (t / yMax) * (H - 4)}
 					<line x1={AXIS} x2={W} y1={y} y2={y} class="grid" />
-					<text x={AXIS - 4} y={y + 3} class="tick" text-anchor="end">{t}</text>
+					<text x={AXIS - 4} y={y + 3} class="tick" text-anchor="end">{fmtTick(t)}</text>
 				{/each}
 				{#each chart.bars as b (b.month)}
 					<rect
@@ -175,88 +325,114 @@
 						role="presentation"
 						onclick={() => (idx = b.i)}
 					>
-						<title>{label(b.month)}: {b.value != null ? `${b.value.toFixed(2)} mm/day` : b.status}</title>
+						<title>
+							{label(b.month)}: {b.value != null ? `${fmtPrimary(b.value)} ${spec.unit}` : b.status}
+						</title>
 					</rect>
 				{/each}
 				{#each chart.yearMarks as m}
 					<text x={m.x} y={H + 12} class="tick">{m.year}</text>
 				{/each}
 			</svg>
-			<p class="axis-note">mm/day</p>
+			<p class="axis-note">{spec.unit}</p>
 		</section>
 
 		<section>
 			<h3>Summary</h3>
 			<dl class="facts">
-				<div><dt>Long-term mean</dt><dd>{stats.mean.toFixed(2)} <small class="inline">mm/day</small></dd></div>
 				<div>
-					<dt>Average year</dt>
+					<dt>Long-term mean</dt>
+					<dd>{fmtPrimary(stats.mean)} <small class="inline">{spec.unit}</small></dd>
+				</div>
+				{#if !annual}
+					<div>
+						<dt>Average year</dt>
+						<dd>
+							{#if annualMean != null}{spec.format(annualMean)} <small class="inline">{spec.unitMonth}</small>
+								<small>{fullYears.length} complete year{fullYears.length === 1 ? '' : 's'}</small>
+							{:else}—{/if}
+						</dd>
+					</div>
+				{/if}
+				<div>
+					<dt>Highest {annual ? 'year' : 'month'}</dt>
 					<dd>
-						{#if annualMean != null}{Math.round(annualMean)} <small class="inline">mm</small>
-							<small>{fullYears.length} complete year{fullYears.length === 1 ? '' : 's'}</small>
-						{:else}—{/if}
+						{fmtPrimary(stats.peak.value)} <small class="inline">{spec.unit}</small>
+						<small>{label(stats.peak.month)}</small>
 					</dd>
 				</div>
 				<div>
-					<dt>Highest month</dt>
-					<dd>{stats.peak.value.toFixed(2)} <small class="inline">mm/day</small><small>{label(stats.peak.month)}</small></dd>
-				</div>
-				<div>
-					<dt>Lowest month</dt>
-					<dd>{stats.low.value.toFixed(2)} <small class="inline">mm/day</small><small>{label(stats.low.month)}</small></dd>
+					<dt>Lowest {annual ? 'year' : 'month'}</dt>
+					<dd>
+						{fmtPrimary(stats.low.value)} <small class="inline">{spec.unit}</small>
+						<small>{label(stats.low.month)}</small>
+					</dd>
 				</div>
 				<div>
 					<dt>Latest with data</dt>
-					<dd>{stats.latest.value.toFixed(2)} <small class="inline">mm/day</small><small>{label(stats.latest.month)}</small></dd>
+					<dd>
+						{fmtPrimary(stats.latest.value)} <small class="inline">{spec.unit}</small>
+						<small>{label(stats.latest.month)}</small>
+					</dd>
 				</div>
 				<div>
-					<dt>Months with data</dt>
-					<dd>{valid.length} <small class="inline">of {points.length}</small><small>{gaps} cloud or missing</small></dd>
+					<dt>{annual ? 'Years' : 'Months'} with data</dt>
+					<dd>{valid.length} <small class="inline">of {points.length}</small><small>{gaps} missing</small></dd>
 				</div>
 			</dl>
 		</section>
 
-		<section>
-			<h3>Average by month</h3>
-			<p class="muted">Mean daily ET for each calendar month across all years.</p>
-			<div class="clim" style:height="{CLIM_H}px">
-				{#each climatology as v, m}
-					<div
-						class="clim-col"
-						class:on={current != null && Number(current.month.slice(5, 7)) === m + 1}
-						title="{MONTHS[m]}: {v != null ? `${v.toFixed(2)} mm/day` : 'no data'}"
-					>
-						<div class="clim-bar" style:height="{((v ?? 0) / climMax) * 100}%" style:background={color(v)}></div>
-						<span>{MONTHS[m][0]}</span>
-					</div>
-				{/each}
-			</div>
-		</section>
-
-		<section>
-			<h3>By year</h3>
-			<table>
-				<thead>
-					<tr><th>Year</th><th class="num">Months</th><th class="num">Total mm</th><th class="num">mm/day</th></tr>
-				</thead>
-				<tbody>
-					{#each years as y (y.year)}
-						<tr class:partial={y.n < 12}>
-							<td>{y.year}</td>
-							<td class="num">{y.n}</td>
-							<td class="num">{Math.round(y.total)}</td>
-							<td class="num">{(y.sum / y.n).toFixed(2)}</td>
-						</tr>
+		{#if !annual}
+			<section>
+				<h3>Average by month</h3>
+				<p class="muted">
+					Mean {rain ? 'monthly rainfall' : mode === 'npp' ? 'monthly NPP' : 'daily ET'} for each calendar month across all years.
+				</p>
+				<div class="clim" style:height="{CLIM_H}px">
+					{#each climatology as v, m}
+						<div
+							class="clim-col"
+							class:on={current != null && Number(current.month.slice(5, 7)) === m + 1}
+							title="{MONTHS[m]}: {v != null ? `${fmtPrimary(v)} ${spec.unit}` : 'no data'}"
+						>
+							<div class="clim-bar" style:height="{((v ?? 0) / climMax) * 100}%" style:background={color(v)}></div>
+							<span>{MONTHS[m][0]}</span>
+						</div>
 					{/each}
-				</tbody>
-			</table>
-			<p class="muted mt">Totals only add months with data, so years with fewer than 12 months (in grey) undercount.</p>
-		</section>
+				</div>
+			</section>
+
+			<section>
+				<h3>By year</h3>
+				<table>
+					<thead>
+						<tr>
+							<th>Year</th>
+							<th class="num">Months</th>
+							<th class="num">Total {spec.unitMonth}</th>
+							<th class="num">{spec.unit}</th>
+						</tr>
+					</thead>
+					<tbody>
+						{#each years as y (y.year)}
+							<tr class:partial={y.n < 12}>
+								<td>{y.year}</td>
+								<td class="num">{y.n}</td>
+								<td class="num">{spec.format(y.total)}</td>
+								<td class="num">{spec.format(y.sum / y.n)}</td>
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+				<p class="muted mt">Totals only add months with data, so years with fewer than 12 months (in grey) undercount.</p>
+			</section>
+		{/if}
 
 		<section>
-			<p class="muted">
-				NRSC Bhuvan NHP actual ET (SNPP-VIIRS energy balance), 750 m, sampled at the centre of this cell.
-			</p>
+			{#if loading}
+				<p class="muted">Loading older {annual ? 'years' : 'months'}…</p>
+			{/if}
+			<p class="muted">{sourceNote}</p>
 		</section>
 	{/if}
 </aside>

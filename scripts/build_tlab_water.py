@@ -30,6 +30,7 @@ load_dotenv(ROOT / ".env")
 
 BUCKET = os.environ.get("TLAB_LAYERS_BUCKET") or os.environ.get("AWS_S3_BUCKET_NAME")
 KEY = os.environ.get("TLAB_WATER_KEY")
+GAPI_KEY = os.environ.get("TLAB_GAPI_CROPS_KEY", "Raichur_gapi_crops.json.gz")
 RETRY_ROUNDS = 3
 
 
@@ -67,6 +68,36 @@ def stream_summary(api: str, boundary: dict, cells: list[str] | None, out: dict[
     return failed
 
 
+def gapi_crops(cells: dict[str, dict]) -> dict:
+    """Prominent-crop snapshot: cell → season → [English crop, ha] from region/summary rows."""
+    out = []
+    for cell in cells.values():
+        by_season: dict[str, dict[str, float]] = {}
+        for row in cell.get("rows") or []:
+            key, _month, code, _band, _plots, area = row
+            if not code or code in ("NO_PREDICTION", "UNKNOWN_CROP"):
+                continue
+            name = " ".join(p.capitalize() for p in str(code).lower().split("_"))
+            season = by_season.setdefault(key, {})
+            season[name] = season.get(name, 0.0) + (area or 0) / 10_000
+        if not by_season:
+            continue
+        out.append(
+            {
+                "id": cell["id"],
+                "seasons": {
+                    key: [[crop, round(ha, 1)] for crop, ha in sorted(sums.items(), key=lambda kv: -kv[1])]
+                    for key, sums in by_season.items()
+                },
+            }
+        )
+    return {
+        "version": 1,
+        "generatedAt": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
+        "cells": out,
+    }
+
+
 def water_totals(cells: list[dict]) -> dict:
     res = subprocess.run(
         ["node", str(ROOT / "scripts" / "tlab_water_totals.mjs")],
@@ -101,6 +132,7 @@ def main() -> None:
         failed = stream_summary(args.api, boundary, failed, cells)
 
     print("Calculating water need per season…", flush=True)
+    crops = gapi_crops(cells)
     totals = water_totals(list(cells.values()))
     cells.clear()
     payload = {
@@ -110,9 +142,10 @@ def main() -> None:
         "failed": failed,
         **totals,
     }
+    s3 = boto3.client("s3", region_name=os.environ.get("AWS_DEFAULT_REGION", "ap-south-1"))
     raw = json.dumps(payload, separators=(",", ":")).encode()
     packed = gzip.compress(raw, compresslevel=9)
-    boto3.client("s3", region_name=os.environ.get("AWS_DEFAULT_REGION", "ap-south-1")).put_object(
+    s3.put_object(
         Bucket=BUCKET,
         Key=KEY,
         Body=packed,
@@ -122,6 +155,18 @@ def main() -> None:
     print(
         f"Uploaded s3://{BUCKET}/{KEY}: {len(totals['cells'])} cells × {len(totals['seasons'])} seasons, "
         f"{len(failed)} cells failed, {len(packed) / 1e3:.0f} kB gzipped"
+    )
+    gapi_raw = json.dumps(crops, separators=(",", ":")).encode()
+    gapi_packed = gzip.compress(gapi_raw, compresslevel=9)
+    s3.put_object(
+        Bucket=BUCKET,
+        Key=GAPI_KEY,
+        Body=gapi_packed,
+        ContentType="application/json",
+        ContentEncoding="gzip",
+    )
+    print(
+        f"Uploaded s3://{BUCKET}/{GAPI_KEY}: {len(crops['cells'])} cells, {len(gapi_packed) / 1e3:.0f} kB gzipped"
     )
 
 

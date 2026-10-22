@@ -89,6 +89,16 @@ export interface CropArea {
 
 const IDLE = new Set(['Fallow', 'Harvested', 'Not recorded', 'Non-agricultural']);
 export const CROP_EMPTY = '#e2e8f0';
+/** S2 level 13 around Raichur is about 1.25 km² */
+const CELL_HA = 125;
+const FILL_OPACITY_MIN = 0.16;
+const FILL_OPACITY_MAX = 0.92;
+
+/** Prominent-crop fill opacity from how much of the ~125 ha cell that crop occupies. */
+export function coverageOpacity(ha: number, cellHa = CELL_HA): number {
+	const t = Math.max(0, Math.min(1, ha / cellHa));
+	return FILL_OPACITY_MIN + (FILL_OPACITY_MAX - FILL_OPACITY_MIN) * t;
+}
 
 function ringContains(ring: CellRing, lng: number, lat: number): boolean {
 	let inside = false;
@@ -100,6 +110,44 @@ function ringContains(ring: CellRing, lng: number, lat: number): boolean {
 		}
 	}
 	return inside;
+}
+
+function geomContains(geom: GeoJSON.Polygon | GeoJSON.MultiPolygon, lng: number, lat: number): boolean {
+	const polys = geom.type === 'Polygon' ? [geom.coordinates] : geom.coordinates;
+	for (const rings of polys) {
+		if (!rings?.length) continue;
+		if (!ringContains(rings[0] as CellRing, lng, lat)) continue;
+		let hole = false;
+		for (let i = 1; i < rings.length; i++) {
+			if (ringContains(rings[i] as CellRing, lng, lat)) {
+				hole = true;
+				break;
+			}
+		}
+		if (!hole) return true;
+	}
+	return false;
+}
+
+function geomBbox(geom: GeoJSON.Polygon | GeoJSON.MultiPolygon): [number, number, number, number] {
+	let s = 90,
+		w = 180,
+		n = -90,
+		e = -180;
+	const walk = (coords: unknown) => {
+		if (!Array.isArray(coords)) return;
+		if (typeof coords[0] === 'number') {
+			const [x, y] = coords as [number, number];
+			s = Math.min(s, y);
+			w = Math.min(w, x);
+			n = Math.max(n, y);
+			e = Math.max(e, x);
+			return;
+		}
+		for (const c of coords) walk(c);
+	};
+	walk(geom.coordinates);
+	return [s, w, n, e];
 }
 
 function geomCentroid(geom: GeoJSON.Polygon | GeoJSON.MultiPolygon): [number, number] | null {
@@ -157,6 +205,8 @@ export class TLabCrops {
 	seasonKey = $state<string | null>(null);
 	/** Group shown as a per-cell area map; null = main crop per cell */
 	focus = $state<number | null>(null);
+	/** S2 cellId → village code whose polygon contains the cell centroid */
+	private cellVillage = $state.raw<Map<string, string> | null>(null);
 
 	generatedAt = $derived(this.snapshot?.generatedAt ?? null);
 	seasons = $derived(
@@ -202,32 +252,131 @@ export class TLabCrops {
 	district = $derived(this.fold(this.season?.district));
 	districtTotal = $derived(this.district.reduce((s, c) => s + c.ha, 0));
 
+	private villageCellCount = $derived.by(() => {
+		const n = new Map<string, number>();
+		if (!this.cellVillage) return n;
+		for (const code of this.cellVillage.values()) n.set(code, (n.get(code) ?? 0) + 1);
+		return n;
+	});
+
+	/** Snapshot cellCrops when present; otherwise village totals split across cells in that village. */
+	private cellPairs(season: CropSeason | null, id: string): Pairs | undefined {
+		if (!season) return undefined;
+		if (Object.keys(season.cellCrops ?? {}).length) return season.cellCrops[id];
+		const code = this.cellVillage?.get(id);
+		if (!code) return undefined;
+		const pairs = season.villageCrops[code];
+		if (!pairs) return undefined;
+		const n = this.villageCellCount.get(code) || 1;
+		return pairs.map(([i, ha]) => [i, ha / n]);
+	}
+
 	private cells = $derived.by(() => {
 		const out = new Map<string, CropArea[]>();
-		for (const [id, pairs] of Object.entries(this.season?.cellCrops ?? {})) out.set(id, this.fold(pairs));
+		const season = this.season;
+		if (!season) return out;
+		if (Object.keys(season.cellCrops ?? {}).length) {
+			for (const [id, pairs] of Object.entries(season.cellCrops)) out.set(id, this.fold(pairs));
+			return out;
+		}
+		if (!this.cellVillage) return out;
+		for (const id of this.cellVillage.keys()) {
+			const areas = this.fold(this.cellPairs(season, id));
+			if (areas.length) out.set(id, areas);
+		}
 		return out;
 	});
+
+	/**
+	 * Assign each S2 cell to the village that contains its centroid so village
+	 * crop totals can colour the grid when the snapshot has no cellCrops.
+	 */
+	bindCells(grid: GeoJSON.FeatureCollection | null, villages: GeoJSON.FeatureCollection | null): void {
+		if (this.cellVillage || !grid?.features.length || !villages?.features.length) return;
+		const STEP = 0.05;
+		type Entry = {
+			code: string;
+			s: number;
+			w: number;
+			n: number;
+			e: number;
+			geom: GeoJSON.Polygon | GeoJSON.MultiPolygon;
+		};
+		const buckets = new Map<string, Entry[]>();
+		for (const f of villages.features) {
+			const code = String(f.properties?.code ?? '');
+			const geom = f.geometry;
+			if (!code || (geom?.type !== 'Polygon' && geom?.type !== 'MultiPolygon')) continue;
+			const [s, w, n, e] = geomBbox(geom);
+			const entry: Entry = { code, s, w, n, e, geom };
+			for (let y = Math.floor(s / STEP); y <= Math.floor(n / STEP); y++) {
+				for (let x = Math.floor(w / STEP); x <= Math.floor(e / STEP); x++) {
+					const k = `${x},${y}`;
+					const b = buckets.get(k);
+					if (b) b.push(entry);
+					else buckets.set(k, [entry]);
+				}
+			}
+		}
+		const out = new Map<string, string>();
+		for (const f of grid.features) {
+			const id = String(f.properties?.cellId ?? '');
+			const geom = f.geometry;
+			if (!id || (geom?.type !== 'Polygon' && geom?.type !== 'MultiPolygon')) continue;
+			const c = geomCentroid(geom);
+			if (!c) continue;
+			const [lng, lat] = c;
+			const cand = buckets.get(`${Math.floor(lng / STEP)},${Math.floor(lat / STEP)}`);
+			if (!cand) continue;
+			for (const v of cand) {
+				if (lat < v.s || lat > v.n || lng < v.w || lng > v.e) continue;
+				if (geomContains(v.geom, lng, lat)) {
+					out.set(id, v.code);
+					break;
+				}
+			}
+		}
+		this.cellVillage = out;
+	}
 
 	/** Largest crop in the cell, ignoring fallow and non-agricultural land unless that's all there is */
 	main(areas: CropArea[]): CropArea | null {
 		return areas.find((a) => !a.group.idle) ?? areas[0] ?? null;
 	}
 
+	/** Prominent crop per cell, ignoring the “colour by one crop” ramp. */
+	mainFills = $derived.by(() => {
+		const out = new Map<string, string>();
+		for (const [id, areas] of this.cells) {
+			const m = this.main(areas);
+			if (!m || m.group.idle) continue;
+			out.set(id, m.group.color);
+		}
+		return out;
+	});
+
 	fills = $derived.by(() => {
 		const out = new Map<string, string>();
 		const focus = this.focus != null ? this.groups[this.focus] : null;
 		const ramp = focus ? focusRamp(focus.color) : [];
+		if (!focus) return this.mainFills;
 		for (const [id, areas] of this.cells) {
-			if (focus) {
-				const ha = areas.find((a) => a.group.id === focus.id)?.ha ?? 0;
-				if (ha < 0.5) continue;
-				let k = 0;
-				while (k < FOCUS_BREAKS.length - 1 && ha >= FOCUS_BREAKS[k]) k++;
-				out.set(id, ramp[k]);
-			} else {
-				const m = this.main(areas);
-				if (m) out.set(id, m.group.color);
-			}
+			const ha = areas.find((a) => a.group.id === focus.id)?.ha ?? 0;
+			if (ha < 0.5) continue;
+			let k = 0;
+			while (k < FOCUS_BREAKS.length - 1 && ha >= FOCUS_BREAKS[k]) k++;
+			out.set(id, ramp[k]);
+		}
+		return out;
+	});
+
+	/** Opacity from how much of the cell the prominent crop covers. */
+	fillOpacities = $derived.by(() => {
+		const out = new Map<string, number>();
+		for (const [id, areas] of this.cells) {
+			const m = this.main(areas);
+			if (!m || m.group.idle) continue;
+			out.set(id, coverageOpacity(m.ha));
 		}
 		return out;
 	});
@@ -240,7 +389,7 @@ export class TLabCrops {
 	history(id: string | null): { season: CropSeason; areas: CropArea[] }[] {
 		return this.seasons.map((season) => ({
 			season,
-			areas: this.fold(id ? season.cellCrops[id] : season.district)
+			areas: this.fold(id ? this.cellPairs(season, id) : season.district)
 		}));
 	}
 
@@ -257,11 +406,16 @@ export class TLabCrops {
 	tooltip(id: string): string | null {
 		const areas = this.cells.get(id);
 		if (!areas?.length || !this.season) return null;
+		const m = this.main(areas);
+		const cover =
+			m && !m.group.idle
+				? `<br><span style="color:#64748b">${cropText(m.group)} covers ${Math.min(100, Math.round((m.ha / CELL_HA) * 100))}% of the cell</span>`
+				: '';
 		const rows = areas
 			.slice(0, 4)
 			.map((a) => `<span style="color:${a.group.color}">■</span> ${cropText(a.group)} ${fmtHa(a.ha)} ha`)
 			.join('<br>');
-		return `<strong>${this.season.label}</strong><br>${rows}<br><span style="color:#64748b">Click for crop history</span>`;
+		return `<strong>${this.season.label}</strong><br>${rows}${cover}<br><span style="color:#64748b">Click for crop history</span>`;
 	}
 
 	// ── Parcels, loaded for villages that overlap the clicked grid cell ───

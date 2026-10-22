@@ -302,6 +302,133 @@ export function etImageUrl(month: string, bounds: LatLngBox, width: number): str
 	return wmsImageUrl(ET_WMS, etLayerName(month), bounds, width);
 }
 
+export type WaporProduct = 'aeti' | 'pcp' | 'npp' | 'tbp' | 'gbwp';
+export type EtKind = 'nrsc' | 'wapor' | 'pcp' | 'npp' | 'tbp' | 'gbwp';
+
+export const WAPOR_KIND_PRODUCT: Record<Exclude<EtKind, 'nrsc'>, WaporProduct> = {
+	wapor: 'aeti',
+	pcp: 'pcp',
+	npp: 'npp',
+	tbp: 'tbp',
+	gbwp: 'gbwp'
+};
+
+export function isWaporKind(kind: EtKind | null): kind is Exclude<EtKind, 'nrsc'> {
+	return kind != null && kind !== 'nrsc';
+}
+
+export const WAPOR_ATTR: Record<Exclude<EtKind, 'nrsc'>, string> = {
+	wapor: 'AETI © FAO WaPOR v3 (L1, 300 m)',
+	pcp: 'Precipitation © FAO WaPOR v3 (CHIRPS, L1 ~5 km)',
+	npp: 'NPP © FAO WaPOR v3 (L1, 300 m)',
+	tbp: 'Biomass © FAO WaPOR v3 (L1-TBP-A, 300 m)',
+	gbwp: 'Water productivity © FAO WaPOR v3 (L1-GBWP-A, 300 m)'
+};
+
+export function waporMapUrl(product: WaporProduct, period: string, bounds: LatLngBox, width: number): string {
+	const [[s, w], [n, e]] = bounds;
+	const height = Math.max(1, Math.round((width * (n - s)) / (e - w)));
+	const params = new URLSearchParams({
+		product,
+		month: period,
+		bbox: [w, s, e, n].map((v) => v.toFixed(5)).join(','),
+		width: String(width),
+		height: String(height)
+	});
+	return `/fwa-api/hydro/wapor/map.png?${params}`;
+}
+
+/** Same-origin colourised PNG of the Raichur extract (FAO WaPOR v3 L1-AETI-M, 300 m) */
+export function waporImageUrl(month: string, bounds: LatLngBox, width: number): string {
+	return waporMapUrl('aeti', month, bounds, width);
+}
+
+/** WaPOR v3 L1-PCP-M (CHIRPS, ~5 km), monthly rainfall in mm */
+export function pcpImageUrl(month: string, bounds: LatLngBox, width: number): string {
+	return waporMapUrl('pcp', month, bounds, width);
+}
+
+/** Monthly rainfall classes (mm) for WaPOR L1-PCP-M */
+export const PCP_BREAKS = [0, 20, 40, 60, 80, 100, 150, 200, 250, 300];
+export const PCP_COLORS = [
+	'#f7fbff',
+	'#deebf7',
+	'#c6dbef',
+	'#9ecae1',
+	'#6baed6',
+	'#4292c6',
+	'#2171b5',
+	'#08519c',
+	'#08306b',
+	'#041c3a'
+];
+
+function classColor(breaks: number[], colors: string[], v: number | null): string {
+	if (v == null) return '#cbd5e1';
+	let i = 0;
+	while (i < breaks.length - 1 && v >= breaks[i + 1]) i++;
+	if (v >= breaks[breaks.length - 1]) i = colors.length - 1;
+	return colors[i];
+}
+
+export function pcpColor(mm: number | null): string {
+	return classColor(PCP_BREAKS, PCP_COLORS, mm);
+}
+
+/** Monthly net primary production (gC/m²) for WaPOR L1-NPP-M */
+export const NPP_BREAKS = [0, 15, 30, 50, 75, 100, 130, 160, 200, 250];
+export const NPP_COLORS = [
+	'#ffffe5',
+	'#f7fcb9',
+	'#d9f0a3',
+	'#addd8e',
+	'#78c679',
+	'#41ab5d',
+	'#238443',
+	'#006837',
+	'#004529',
+	'#00240f'
+];
+export function nppColor(v: number | null): string {
+	return classColor(NPP_BREAKS, NPP_COLORS, v);
+}
+
+/** Annual total biomass production (kg/ha) for WaPOR L1-TBP-A */
+export const TBP_BREAKS = [0, 1000, 2500, 5000, 7500, 10000, 15000, 20000, 25000, 35000];
+export const TBP_COLORS = [
+	'#f7fcfd',
+	'#e5f5f9',
+	'#ccece6',
+	'#99d8c9',
+	'#66c2a4',
+	'#41ae76',
+	'#238b45',
+	'#006d2c',
+	'#00441b',
+	'#002b12'
+];
+export function tbpColor(v: number | null): string {
+	return classColor(TBP_BREAKS, TBP_COLORS, v);
+}
+
+/** Annual gross biomass water productivity (kg/m³) for WaPOR L1-GBWP-A */
+export const GBWP_BREAKS = [0, 0.3, 0.6, 0.9, 1.2, 1.5, 2.0, 2.5, 3.0, 4.0];
+export const GBWP_COLORS = [
+	'#a50026',
+	'#d73027',
+	'#f46d43',
+	'#fdae61',
+	'#fee08b',
+	'#d9ef8b',
+	'#a6d96a',
+	'#66bd63',
+	'#1a9850',
+	'#006837'
+];
+export function gbwpColor(v: number | null): string {
+	return classColor(GBWP_BREAKS, GBWP_COLORS, v);
+}
+
 /** Inclusive list of YYYY-MM months */
 export function monthRange(first: string, last: string): string[] {
 	const out: string[] = [];
@@ -315,6 +442,14 @@ export function monthRange(first: string, last: string): string[] {
 		}
 	}
 	return out;
+}
+
+/** Inclusive list of calendar years as YYYY */
+export function yearRange(first: string, last: string): string[] {
+	const a = Number(first.slice(0, 4));
+	const b = Number(last.slice(0, 4));
+	if (!Number.isFinite(a) || !Number.isFinite(b) || b < a) return [];
+	return Array.from({ length: b - a + 1 }, (_, i) => String(a + i));
 }
 
 export function addDays(iso: string, days: number): string {

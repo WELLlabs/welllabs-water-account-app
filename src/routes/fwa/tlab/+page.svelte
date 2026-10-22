@@ -12,13 +12,17 @@
 	import { fmt, fmtAcres } from '$lib/components/cropcalc/format';
 	import { TLabWater, WATER_PALETTE, seasonParts } from '$lib/tlabWater.svelte';
 	import { SM_BREAKS, SM_LUT, SM_PALETTE, TLabSoil, smColor, smFromByte } from '$lib/tlabSoil.svelte';
-	import { FOCUS_BREAKS, TLabCrops, cropText, fmtHa, focusRamp, primaryKn } from '$lib/tlabCrops.svelte';
-	import { CROP_SWATCHES } from '$lib/cropColors';
+	import { FOCUS_BREAKS, TLabCrops, coverageOpacity, cropText, fmtHa, focusRamp, primaryKn } from '$lib/tlabCrops.svelte';
+	import { TLabGapi } from '$lib/tlabGapi.svelte';
 	import {
 		LAYERS,
 		DPRVI_BASE,
 		CANAL_TYPES,
 		ET_COLORS,
+		PCP_COLORS,
+		NPP_COLORS,
+		TBP_COLORS,
+		GBWP_COLORS,
 		cropColor,
 		fieldSeasonCrop,
 		formatAcres,
@@ -30,6 +34,7 @@
 		type AgriFeature,
 		type AluType
 	} from '$lib/tlab';
+	import { TLabWaporLayer } from '$lib/tlabWapor.svelte';
 
 	let grid = $state<GeoJSON.FeatureCollection | null>(null);
 	let boundary = $state<GeoJSON.FeatureCollection | null>(null);
@@ -57,6 +62,11 @@
 		water: true,
 		landscape: false,
 		et: false,
+		etWapor: false,
+		pcp: false,
+		npp: false,
+		tbp: false,
+		gbwp: false,
 		sm: false,
 		crops: false,
 		boundaries: false,
@@ -93,6 +103,37 @@
 				href: 'https://bhuvan.nrsc.gov.in/nhpgs/nhp_evapotranspiration/wms'
 			}
 		],
+		etWapor: [
+			{
+				label: 'FAO WaPOR v3 Level 1 actual evapotranspiration and interception (L1-AETI-M)',
+				href: 'https://www.fao.org/in-action/remote-sensing-for-water-productivity/wapor/en'
+			}
+		],
+		pcp: [
+			{
+				label: 'FAO WaPOR v3 Level 1 precipitation (L1-PCP-M, CHIRPS)',
+				href: 'https://www.fao.org/in-action/remote-sensing-for-water-productivity/wapor/en'
+			},
+			{ label: 'CHIRPS (Climate Hazards Center)', href: 'https://www.chc.ucsb.edu/data/chirps' }
+		],
+		npp: [
+			{
+				label: 'FAO WaPOR v3 Level 1 net primary production (L1-NPP-M)',
+				href: 'https://www.fao.org/in-action/remote-sensing-for-water-productivity/wapor/en'
+			}
+		],
+		tbp: [
+			{
+				label: 'FAO WaPOR v3 Level 1 total biomass production (L1-TBP-A)',
+				href: 'https://www.fao.org/in-action/remote-sensing-for-water-productivity/wapor/en'
+			}
+		],
+		gbwp: [
+			{
+				label: 'FAO WaPOR v3 Level 1 gross biomass water productivity (L1-GBWP-A)',
+				href: 'https://www.fao.org/in-action/remote-sensing-for-water-productivity/wapor/en'
+			}
+		],
 		sm: [
 			{
 				label: 'Sentinel-1 RTC (10 m) on Microsoft Planetary Computer',
@@ -119,6 +160,11 @@
 		water: 'S2 level 13 (~1.3 km); plot outlines from Google ALU',
 		landscape: 'Field polygons in the selected S2 level-13 cell',
 		et: '750 m, monthly (SNPP-VIIRS energy balance)',
+		etWapor: '300 m, monthly (WaPOR v3 L1-AETI-M)',
+		pcp: '~5 km, monthly (WaPOR v3 L1-PCP-M / CHIRPS)',
+		npp: '300 m, monthly (WaPOR v3 L1-NPP-M)',
+		tbp: '300 m, annual (WaPOR v3 L1-TBP-A)',
+		gbwp: '300 m, annual (WaPOR v3 L1-GBWP-A)',
 		sm: '250 m (from 10 m Sentinel-1 RTC)',
 		crops: 'Survey-number extents from raichur_raw on S3; parcels after a cell click',
 		boundaries: 'Vector (district / WUCS)',
@@ -128,25 +174,46 @@
 	};
 
 	const water = new TLabWater();
-	onDestroy(() => water.destroy());
+	const npp = new TLabWaporLayer('npp', 'month');
+	const tbp = new TLabWaporLayer('tbp', 'year');
+	const gbwp = new TLabWaporLayer('gbwp', 'year');
+	onDestroy(() => {
+		water.destroy();
+		etSeriesController?.abort();
+		waporSeriesController?.abort();
+		pcpSeriesController?.abort();
+		npp.abort();
+		tbp.abort();
+		gbwp.abort();
+	});
 	let waterPanelHidden = $state(false);
 	let waterCropSource = $state<WaterCropSource>('gapi');
 	onMount(() => void water.load());
 
 	/** Data layers colour the whole district, so only one is shown at a time */
-	type DataLayer = 'water' | 'landscape' | 'et' | 'sm' | 'crops';
+	/** Flip to restore the NRSC Bhuvan ET sidebar layer (API still lives in api/hydro.py). */
+	const SHOW_NRSC_ET = false;
+	type DataLayer = 'water' | 'landscape' | 'et' | 'etWapor' | 'pcp' | 'npp' | 'tbp' | 'gbwp' | 'sm' | 'crops';
 	let dataLayer = $state<DataLayer | null>('water');
 	const showWater = $derived(dataLayer === 'water');
 	const showLandscape = $derived(dataLayer === 'landscape');
 	const showEt = $derived(dataLayer === 'et');
+	const showEtWapor = $derived(dataLayer === 'etWapor');
+	const showPcp = $derived(dataLayer === 'pcp');
+	const showNpp = $derived(dataLayer === 'npp');
+	const showTbp = $derived(dataLayer === 'tbp');
+	const showGbwp = $derived(dataLayer === 'gbwp');
 	const showSm = $derived(dataLayer === 'sm');
 	const showCrops = $derived(dataLayer === 'crops');
+	const hydroLayers = ['et', 'etWapor', 'pcp', 'npp', 'tbp', 'gbwp'] as const;
 
 	function setDataLayer(layer: DataLayer, on: boolean) {
 		dataLayer = on ? layer : dataLayer === layer ? null : dataLayer;
 		if (dataLayer !== 'landscape') selectedFeature = null;
 		if (!on) return;
-		for (const k of ['water', 'landscape', 'et', 'sm', 'crops'] as const) openSec[k] = k === layer;
+		for (const k of ['water', 'landscape', 'et', 'etWapor', 'pcp', 'npp', 'tbp', 'gbwp', 'sm', 'crops'] as const)
+			openSec[k] = k === layer;
+		if ((hydroLayers as readonly string[]).includes(layer)) etPanelHidden = false;
 		if (layer === 'water' && water.status === 'error') void water.load();
 	}
 
@@ -233,8 +300,50 @@
 		return new Date(`${ym}-01T00:00:00`).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' });
 	}
 
+	function formatPeriod(period: string): string {
+		return period.length === 4 ? period : formatMonth(period);
+	}
+
+	function fmtTbp(v: number): string {
+		return Math.round(v).toLocaleString('en-IN');
+	}
+
 	function stepEt(delta: number) {
 		etIdx = Math.min(etMonths.length - 1, Math.max(0, etIdx + delta));
+	}
+
+	let waporRange = $state<{ first: string; latest: string } | null>(null);
+	let waporRangeError = $state<string | null>(null);
+	let waporIdx = $state(0);
+	let waporOpacity = $state(0.7);
+	const waporMonths = $derived(waporRange ? monthRange(waporRange.first, waporRange.latest) : []);
+	const waporMonth = $derived(waporMonths[waporIdx] ?? null);
+
+	let waporSeries = $state.raw<EtPoint[] | null>(null);
+	let waporSeriesLoading = $state(false);
+	let waporSeriesError = $state<string | null>(null);
+	let waporSeriesKey = '';
+	let waporSeriesController: AbortController | null = null;
+
+	function stepWapor(delta: number) {
+		waporIdx = Math.min(waporMonths.length - 1, Math.max(0, waporIdx + delta));
+	}
+
+	let pcpRange = $state<{ first: string; latest: string } | null>(null);
+	let pcpRangeError = $state<string | null>(null);
+	let pcpIdx = $state(0);
+	let pcpOpacity = $state(0.7);
+	const pcpMonths = $derived(pcpRange ? monthRange(pcpRange.first, pcpRange.latest) : []);
+	const pcpMonth = $derived(pcpMonths[pcpIdx] ?? null);
+
+	let pcpSeries = $state.raw<EtPoint[] | null>(null);
+	let pcpSeriesLoading = $state(false);
+	let pcpSeriesError = $state<string | null>(null);
+	let pcpSeriesKey = '';
+	let pcpSeriesController: AbortController | null = null;
+
+	function stepPcp(delta: number) {
+		pcpIdx = Math.min(pcpMonths.length - 1, Math.max(0, pcpIdx + delta));
 	}
 
 	function setSmIdx(i: number) {
@@ -298,6 +407,185 @@
 		void loadEtSeries(lat, lng, etRange.first, etRange.latest);
 	});
 
+	async function loadWaporSeries(lat: number, lng: number, first: string, latest: string) {
+		waporSeriesController?.abort();
+		const ctrl = new AbortController();
+		waporSeriesController = ctrl;
+		waporSeriesLoading = true;
+		waporSeriesError = null;
+		waporSeries = null;
+		try {
+			const params = new URLSearchParams({
+				lat: lat.toFixed(5),
+				lng: lng.toFixed(5),
+				start: first,
+				end: latest
+			});
+			while (!ctrl.signal.aborted) {
+				const res = await fetch(`/fwa-api/hydro/wapor/series?${params}`, {
+					signal: ctrl.signal,
+					cache: 'no-store'
+				});
+				const body = await res.json().catch(() => null);
+				if (!res.ok) throw new Error(errorMessage(res.status, body));
+				if (waporSeriesController !== ctrl) return;
+				const series = body.series as EtPoint[];
+				waporSeries = series;
+				if (waporIdx === waporMonths.length - 1) {
+					const lastOk = [...series].reverse().find((p) => p.value != null);
+					const idx = lastOk ? waporMonths.indexOf(lastOk.month) : -1;
+					if (idx >= 0) waporIdx = idx;
+				}
+				if (body.complete) break;
+				await new Promise<void>((resolve, reject) => {
+					const t = setTimeout(resolve, 2000);
+					ctrl.signal.addEventListener(
+						'abort',
+						() => {
+							clearTimeout(t);
+							reject(new DOMException('Aborted', 'AbortError'));
+						},
+						{ once: true }
+					);
+				});
+			}
+		} catch (e) {
+			if (ctrl.signal.aborted) return;
+			waporSeriesError = e instanceof Error ? e.message : String(e);
+			waporSeriesKey = '';
+		} finally {
+			if (waporSeriesController === ctrl) waporSeriesLoading = false;
+		}
+	}
+
+	$effect(() => {
+		if (!cellCenter) {
+			waporSeriesController?.abort();
+			waporSeriesKey = '';
+			waporSeries = null;
+			waporSeriesLoading = false;
+			return;
+		}
+		if (!showEtWapor || !waporRange) {
+			waporSeriesController?.abort();
+			if (!showEtWapor) waporSeriesKey = '';
+			return;
+		}
+		const { lat, lng } = cellCenter;
+		const key = `${lat.toFixed(5)},${lng.toFixed(5)}`;
+		if (key === waporSeriesKey) return;
+		waporSeriesKey = key;
+		void loadWaporSeries(lat, lng, waporRange.first, waporRange.latest);
+	});
+
+	async function loadPcpSeries(lat: number, lng: number, first: string, latest: string) {
+		pcpSeriesController?.abort();
+		const ctrl = new AbortController();
+		pcpSeriesController = ctrl;
+		pcpSeriesLoading = true;
+		pcpSeriesError = null;
+		pcpSeries = null;
+		try {
+			const params = new URLSearchParams({
+				product: 'pcp',
+				lat: lat.toFixed(5),
+				lng: lng.toFixed(5),
+				start: first,
+				end: latest
+			});
+			while (!ctrl.signal.aborted) {
+				const res = await fetch(`/fwa-api/hydro/wapor/series?${params}`, {
+					signal: ctrl.signal,
+					cache: 'no-store'
+				});
+				const body = await res.json().catch(() => null);
+				if (!res.ok) throw new Error(errorMessage(res.status, body));
+				if (pcpSeriesController !== ctrl) return;
+				const series = body.series as EtPoint[];
+				pcpSeries = series;
+				if (pcpIdx === pcpMonths.length - 1) {
+					const lastOk = [...series].reverse().find((p) => p.value != null);
+					const idx = lastOk ? pcpMonths.indexOf(lastOk.month) : -1;
+					if (idx >= 0) pcpIdx = idx;
+				}
+				if (body.complete) break;
+				await new Promise<void>((resolve, reject) => {
+					const t = setTimeout(resolve, 2000);
+					ctrl.signal.addEventListener(
+						'abort',
+						() => {
+							clearTimeout(t);
+							reject(new DOMException('Aborted', 'AbortError'));
+						},
+						{ once: true }
+					);
+				});
+			}
+		} catch (e) {
+			if (ctrl.signal.aborted) return;
+			pcpSeriesError = e instanceof Error ? e.message : String(e);
+			pcpSeriesKey = '';
+		} finally {
+			if (pcpSeriesController === ctrl) pcpSeriesLoading = false;
+		}
+	}
+
+	$effect(() => {
+		if (!cellCenter) {
+			pcpSeriesController?.abort();
+			pcpSeriesKey = '';
+			pcpSeries = null;
+			pcpSeriesLoading = false;
+			return;
+		}
+		if (!showPcp || !pcpRange) {
+			pcpSeriesController?.abort();
+			if (!showPcp) pcpSeriesKey = '';
+			return;
+		}
+		const { lat, lng } = cellCenter;
+		const key = `${lat.toFixed(5)},${lng.toFixed(5)}`;
+		if (key === pcpSeriesKey) return;
+		pcpSeriesKey = key;
+		void loadPcpSeries(lat, lng, pcpRange.first, pcpRange.latest);
+	});
+
+	$effect(() => {
+		if (!cellCenter) {
+			npp.stopSeries();
+			return;
+		}
+		if (!showNpp || !npp.range) {
+			npp.stopSeries(!showNpp);
+			return;
+		}
+		npp.startSeries(cellCenter.lat, cellCenter.lng);
+	});
+
+	$effect(() => {
+		if (!cellCenter) {
+			tbp.stopSeries();
+			return;
+		}
+		if (!showTbp || !tbp.range) {
+			tbp.stopSeries(!showTbp);
+			return;
+		}
+		tbp.startSeries(cellCenter.lat, cellCenter.lng);
+	});
+
+	$effect(() => {
+		if (!cellCenter) {
+			gbwp.stopSeries();
+			return;
+		}
+		if (!showGbwp || !gbwp.range) {
+			gbwp.stopSeries(!showGbwp);
+			return;
+		}
+		gbwp.startSeries(cellCenter.lat, cellCenter.lng);
+	});
+
 	$effect(() => {
 		if (showSm) untrack(() => void soil.load());
 	});
@@ -314,6 +602,16 @@
 	let cropPanelHidden = $state(false);
 	$effect(() => {
 		if (showCrops || waterFromSurvey) untrack(() => void crops.load());
+	});
+	const gapi = new TLabGapi();
+	onDestroy(() => gapi.abort());
+	$effect(() => {
+		gapi.seasonKey = water.seasonKey;
+	});
+	$effect(() => {
+		const on = showLandscape;
+		const b = boundary;
+		if (on && b) untrack(() => void gapi.load(b));
 	});
 	const cropFocus = $derived(crops.focus != null ? crops.groups[crops.focus] : null);
 	/** Season picker: years, then the seasons that year has */
@@ -379,6 +677,11 @@
 
 	let villages = $state.raw<GeoJSON.FeatureCollection | null>(null);
 	let showVillages = $state(true);
+	$effect(() => {
+		const g = grid;
+		const v = villages;
+		if (g && v) untrack(() => crops.bindCells(g, v));
+	});
 	const villageBoxes = $derived.by(() => {
 		const out: [string, number, number, number, number][] = [];
 		for (const f of villages?.features ?? []) {
@@ -438,21 +741,29 @@
 	const surveyHudNote = $derived(
 		cropPlotsOn
 			? 'Parcels take the colour of their largest crop.'
-			: 'Click a cell to colour cadastral parcels from the crop survey.'
+			: 'Colour is the largest crop; stronger fill where it covers more of the cell.'
 	);
 
 	const cellFills = $derived(
 		waterFromGapi
 			? waterFills
-			: (showCrops || waterFromSurvey) && crops.status === 'done' && !cropPlotsOn && crops.fills.size
-				? crops.fills
-				: null
+			: showLandscape
+				? landscapeFills
+				: (showCrops || waterFromSurvey) && crops.status === 'done' && crops.fills.size
+					? crops.fills
+					: null
 	);
 	const cellTooltip = (id: string) =>
-		showCrops || waterFromSurvey ? crops.tooltip(id) : waterTooltip(id);
+		showCrops || waterFromSurvey ? crops.tooltip(id) : showLandscape ? landscapeTooltip(id) : waterTooltip(id);
 	const smRaster = $derived(showSm ? soil.frame : null);
 	let etPanelHidden = $state(false);
 	const etCellValue = $derived(etMonth ? (etSeries?.find((p) => p.month === etMonth) ?? null) : null);
+	const waporCellValue = $derived(
+		waporMonth ? (waporSeries?.find((p) => p.month === waporMonth) ?? null) : null
+	);
+	const pcpCellValue = $derived(
+		pcpMonth ? (pcpSeries?.find((p) => p.month === pcpMonth) ?? null) : null
+	);
 	$effect(() => {
 		const f = selectedFeature;
 		if (f && !visible[f.properties?.alu_type as AluType]) selectedFeature = null;
@@ -525,6 +836,45 @@
 			.sort((a, b) => b[1] - a[1])
 			.map(([crop, n]) => ({ crop, n, label: formatCropLabel(crop), color: cropColor(crop) }));
 	});
+	/** Google ALU prominent crop in the selected cell, hectares of farm plots. */
+	const landscapeMain = $derived.by(() => {
+		if (!data) return null;
+		const sums = new Map<string, number>();
+		for (const f of data.features) {
+			if (f.properties?.alu_type !== 'field') continue;
+			const crop = fieldSeasonCrop(f.properties.monitoring_prediction, water.seasonKey);
+			if (!crop) continue;
+			sums.set(crop, (sums.get(crop) ?? 0) + (f.properties.area_sq_m ?? 0) / 10_000);
+		}
+		let crop = '';
+		let ha = 0;
+		for (const [c, a] of sums) {
+			if (a > ha) {
+				crop = c;
+				ha = a;
+			}
+		}
+		return crop ? { crop, ha } : null;
+	});
+	const landscapeFills = $derived.by(() => {
+		if (!showLandscape) return null;
+		const out = gapi.fills.size ? new Map(gapi.fills) : new Map<string, string>();
+		if (selectedCellId && landscapeMain) out.set(selectedCellId, cropColor(landscapeMain.crop));
+		return out.size ? out : null;
+	});
+	const landscapeOpacities = $derived.by(() => {
+		if (!showLandscape) return null;
+		const out = gapi.opacities.size ? new Map(gapi.opacities) : new Map<string, number>();
+		if (selectedCellId && landscapeMain) out.set(selectedCellId, coverageOpacity(landscapeMain.ha));
+		return out.size ? out : null;
+	});
+	function landscapeTooltip(id: string): string | null {
+		if (id === selectedCellId && landscapeMain) {
+			const pct = Math.min(100, Math.round((landscapeMain.ha / 125) * 100));
+			return `<strong>${formatCropLabel(landscapeMain.crop)}</strong> · Google ALU<br><span style="color:#64748b">${formatCropLabel(landscapeMain.crop)} covers ${pct}% of the cell</span><br><span style="color:#64748b">Click a farm plot, well or pond</span>`;
+		}
+		return gapi.tooltip(id);
+	}
 	const landscapeHudLegend = $derived(
 		landscapeCrops.length
 			? landscapeCrops.slice(0, 8).map((r) => ({
@@ -532,7 +882,14 @@
 					label: r.label,
 					count: r.n.toLocaleString('en-IN')
 				}))
-			: CROP_SWATCHES.slice(0, 8).map((s) => ({ color: s.color, label: s.label }))
+			: gapi.district
+					.filter((a) => a.crop !== 'Fallow' && a.crop !== 'Harvested')
+					.slice(0, 8)
+					.map((a) => ({
+						color: cropColor(a.crop),
+						label: a.crop,
+						count: `${fmtHa(a.ha)} ha`
+					}))
 	);
 
 	onMount(async () => {
@@ -589,15 +946,38 @@
 	});
 
 	onMount(async () => {
+		if (SHOW_NRSC_ET) {
+			try {
+				const res = await fetch('/fwa-api/hydro/et/latest', { cache: 'no-store' });
+				const body = await res.json().catch(() => null);
+				if (!res.ok) throw new Error(errorMessage(res.status, body));
+				etRange = body;
+				etIdx = monthRange(body.first, body.latest).length - 1;
+			} catch (e) {
+				etRangeError = e instanceof Error ? e.message : String(e);
+			}
+		}
 		try {
-			const res = await fetch('/fwa-api/hydro/et/latest', { cache: 'no-store' });
+			const res = await fetch('/fwa-api/hydro/wapor/latest', { cache: 'no-store' });
 			const body = await res.json().catch(() => null);
 			if (!res.ok) throw new Error(errorMessage(res.status, body));
-			etRange = body;
-			etIdx = monthRange(body.first, body.latest).length - 1;
+			waporRange = body;
+			waporIdx = monthRange(body.first, body.latest).length - 1;
 		} catch (e) {
-			etRangeError = e instanceof Error ? e.message : String(e);
+			waporRangeError = e instanceof Error ? e.message : String(e);
 		}
+		try {
+			const res = await fetch('/fwa-api/hydro/wapor/latest?product=pcp', { cache: 'no-store' });
+			const body = await res.json().catch(() => null);
+			if (!res.ok) throw new Error(errorMessage(res.status, body));
+			pcpRange = body;
+			pcpIdx = monthRange(body.first, body.latest).length - 1;
+		} catch (e) {
+			pcpRangeError = e instanceof Error ? e.message : String(e);
+		}
+		void npp.loadLatest();
+		void tbp.loadLatest();
+		void gbwp.loadLatest();
 	});
 
 	function errorMessage(status: number, body: unknown): string {
@@ -945,14 +1325,21 @@
 					</li>
 				{/each}
 			</ul>
-			{#if data}
-				<p class="tlab-muted tlab-xs tlab-mt">
-					Farm plots coloured by Google's predicted crop. Year, season and legend are on the map.
-				</p>
-			{/if}
+			<p class="tlab-muted tlab-xs tlab-mt">
+				{#if gapi.status === 'loading' && gapi.total}
+					Loading Google ALU crops… {gapi.done.toLocaleString('en-IN')} of {gapi.total.toLocaleString('en-IN')} cells.
+				{:else if data}
+					Farm plots take Google's predicted crop. Grid colour is the largest Google ALU crop in the cell; stronger fill
+					where it covers more of the cell.
+				{:else}
+					Each cell takes the colour of its largest Google ALU crop. Stronger fill means that crop covers more of the
+					cell (~125 ha). Click a cell for farm plots, wells and ponds.
+				{/if}
+			</p>
 			{@render sources('landscape')}
 		</TLabSection>
 
+		{#if SHOW_NRSC_ET}
 		<TLabSection
 			title="Evapotranspiration"
 			subtitle="NRSC Bhuvan NHP · monthly actual ET, 750 m"
@@ -1049,6 +1436,512 @@
 				</p>
 			{/if}
 			{@render sources('et')}
+		</TLabSection>
+		{/if}
+
+		<TLabSection
+			title="Evapotranspiration"
+			subtitle="FAO WaPOR v3 · monthly AETI, 300 m"
+			swatch="linear-gradient(135deg, #ffffa0, #47de31, #203a77)"
+			exclusive
+			on={showEtWapor}
+			onToggle={(v) => setDataLayer('etWapor', v)}
+			bind:open={openSec.etWapor}
+		>
+			{#if waporRangeError}
+				<p class="tlab-status tlab-error">WaPOR ET unavailable: {waporRangeError}</p>
+			{:else if !waporRange || !waporMonth}
+				<p class="tlab-muted tlab-xs">Checking latest WaPOR layer…</p>
+			{:else}
+				<div class="tlab-snap-head">
+					<span class="tlab-snap-title">Month</span>
+					<strong>{formatMonth(waporMonth)}</strong>
+				</div>
+				<div class="tlab-snap-row">
+					<button
+						type="button"
+						class="tlab-step"
+						aria-label="Previous WaPOR ET month"
+						disabled={waporIdx <= 0}
+						onclick={() => stepWapor(-1)}>‹</button
+					>
+					<input
+						type="range"
+						min="0"
+						max={waporMonths.length - 1}
+						step="1"
+						aria-label="WaPOR ET month"
+						bind:value={waporIdx}
+					/>
+					<button
+						type="button"
+						class="tlab-step"
+						aria-label="Next WaPOR ET month"
+						disabled={waporIdx >= waporMonths.length - 1}
+						onclick={() => stepWapor(1)}>›</button
+					>
+				</div>
+				<div class="tlab-snap-ends tlab-xs tlab-muted">
+					<span>{waporRange.first.slice(0, 4)}</span>
+					<span>{waporRange.latest.slice(0, 4)}</span>
+				</div>
+
+				<div class="tlab-legend tlab-mt">
+					<div class="tlab-classes">
+						{#each ET_COLORS as c}<span style:background={c}></span>{/each}
+					</div>
+					<div class="tlab-legend-ticks tlab-xs tlab-muted">
+						<span>0</span><span>5</span><span>10 mm/day</span>
+					</div>
+				</div>
+				<label class="tlab-opacity tlab-mt">
+					<span class="tlab-xs tlab-muted">Opacity</span>
+					<input type="range" min="0.1" max="1" step="0.05" bind:value={waporOpacity} />
+				</label>
+
+				<div class="tlab-subcard">
+					<div class="tlab-subcard-title">Selected cell</div>
+					{#if !selectedCellId}
+						<p class="tlab-muted tlab-xs">Click a cell for its ET value and monthly history.</p>
+					{:else if !showEtWapor}
+						<p class="tlab-muted tlab-xs">Select this layer to load this cell's WaPOR ET.</p>
+					{:else if waporSeriesLoading && !waporSeries}
+						<p class="tlab-muted tlab-xs">Loading WaPOR ET history for this cell…</p>
+					{:else if waporSeriesError}
+						<p class="tlab-status tlab-error">{waporSeriesError}</p>
+					{:else if waporSeries}
+						<dl class="tlab-summary">
+							<div>
+								<dt>Cell ET</dt>
+								<dd>
+									{#if waporCellValue?.value != null}
+										{waporCellValue.value.toFixed(2)} <span class="tlab-unit">mm/day</span>
+									{:else}
+										<span class="tlab-unit">{waporCellValue?.status === 'cloud' ? 'Cloud' : 'No data'}</span>
+									{/if}
+								</dd>
+							</div>
+						</dl>
+						{#if waporSeriesLoading}
+							<p class="tlab-muted tlab-xs tlab-mt">Filling older months from WaPOR…</p>
+						{/if}
+						{#if etPanelHidden}
+							<button type="button" class="tlab-link tlab-mt" onclick={() => (etPanelHidden = false)}>
+								Open ET stats and time series
+							</button>
+						{/if}
+					{/if}
+				</div>
+				<p class="tlab-muted tlab-xs tlab-mt">
+					FAO WaPOR v3 Level 1 actual evapotranspiration and interception (L1-AETI-M), 300 m, monthly
+					total converted to mm/day. India is not in the 100 m Level 2 countries.
+				</p>
+			{/if}
+			{@render sources('etWapor')}
+		</TLabSection>
+
+		<TLabSection
+			title="Precipitation"
+			subtitle="FAO WaPOR v3 · monthly CHIRPS, ~5 km"
+			swatch="linear-gradient(135deg, {PCP_COLORS[1]}, {PCP_COLORS[5]}, {PCP_COLORS[9]})"
+			exclusive
+			on={showPcp}
+			onToggle={(v) => setDataLayer('pcp', v)}
+			bind:open={openSec.pcp}
+		>
+			{#if pcpRangeError}
+				<p class="tlab-status tlab-error">WaPOR rainfall unavailable: {pcpRangeError}</p>
+			{:else if !pcpRange || !pcpMonth}
+				<p class="tlab-muted tlab-xs">Checking latest rainfall layer…</p>
+			{:else}
+				<div class="tlab-snap-head">
+					<span class="tlab-snap-title">Month</span>
+					<strong>{formatMonth(pcpMonth)}</strong>
+				</div>
+				<div class="tlab-snap-row">
+					<button
+						type="button"
+						class="tlab-step"
+						aria-label="Previous rainfall month"
+						disabled={pcpIdx <= 0}
+						onclick={() => stepPcp(-1)}>‹</button
+					>
+					<input
+						type="range"
+						min="0"
+						max={pcpMonths.length - 1}
+						step="1"
+						aria-label="Rainfall month"
+						bind:value={pcpIdx}
+					/>
+					<button
+						type="button"
+						class="tlab-step"
+						aria-label="Next rainfall month"
+						disabled={pcpIdx >= pcpMonths.length - 1}
+						onclick={() => stepPcp(1)}>›</button
+					>
+				</div>
+				<div class="tlab-snap-ends tlab-xs tlab-muted">
+					<span>{pcpRange.first.slice(0, 4)}</span>
+					<span>{pcpRange.latest.slice(0, 4)}</span>
+				</div>
+
+				<div class="tlab-legend tlab-mt">
+					<div class="tlab-classes">
+						{#each PCP_COLORS as c}<span style:background={c}></span>{/each}
+					</div>
+					<div class="tlab-legend-ticks tlab-xs tlab-muted">
+						<span>0</span><span>100</span><span>300 mm</span>
+					</div>
+				</div>
+				<label class="tlab-opacity tlab-mt">
+					<span class="tlab-xs tlab-muted">Opacity</span>
+					<input type="range" min="0.1" max="1" step="0.05" bind:value={pcpOpacity} />
+				</label>
+
+				<div class="tlab-subcard">
+					<div class="tlab-subcard-title">Selected cell</div>
+					{#if !selectedCellId}
+						<p class="tlab-muted tlab-xs">Click a cell for its rainfall and monthly history.</p>
+					{:else if !showPcp}
+						<p class="tlab-muted tlab-xs">Select this layer to load this cell's rainfall.</p>
+					{:else if pcpSeriesLoading && !pcpSeries}
+						<p class="tlab-muted tlab-xs">Loading rainfall history for this cell…</p>
+					{:else if pcpSeriesError}
+						<p class="tlab-status tlab-error">{pcpSeriesError}</p>
+					{:else if pcpSeries}
+						<dl class="tlab-summary">
+							<div>
+								<dt>Cell rainfall</dt>
+								<dd>
+									{#if pcpCellValue?.value != null}
+										{pcpCellValue.value.toFixed(0)} <span class="tlab-unit">mm</span>
+									{:else}
+										<span class="tlab-unit">No data</span>
+									{/if}
+								</dd>
+							</div>
+						</dl>
+						{#if pcpSeriesLoading}
+							<p class="tlab-muted tlab-xs tlab-mt">Filling older months from WaPOR…</p>
+						{/if}
+						{#if etPanelHidden}
+							<button type="button" class="tlab-link tlab-mt" onclick={() => (etPanelHidden = false)}>
+								Open rainfall stats and time series
+							</button>
+						{/if}
+					{/if}
+				</div>
+				<p class="tlab-muted tlab-xs tlab-mt">
+					FAO WaPOR v3 Level 1 precipitation (L1-PCP-M), monthly CHIRPS totals at about 5 km. Coarser
+					than the 300 m ET layer.
+				</p>
+			{/if}
+			{@render sources('pcp')}
+		</TLabSection>
+
+		<TLabSection
+			title="Net primary production"
+			subtitle="FAO WaPOR v3 · monthly NPP, 300 m"
+			swatch="linear-gradient(135deg, {NPP_COLORS[1]}, {NPP_COLORS[5]}, {NPP_COLORS[9]})"
+			exclusive
+			on={showNpp}
+			onToggle={(v) => setDataLayer('npp', v)}
+			bind:open={openSec.npp}
+		>
+			{#if npp.rangeError}
+				<p class="tlab-status tlab-error">WaPOR NPP unavailable: {npp.rangeError}</p>
+			{:else if !npp.range || !npp.period}
+				<p class="tlab-muted tlab-xs">Checking latest NPP layer…</p>
+			{:else}
+				<div class="tlab-snap-head">
+					<span class="tlab-snap-title">Month</span>
+					<strong>{formatPeriod(npp.period)}</strong>
+				</div>
+				<div class="tlab-snap-row">
+					<button
+						type="button"
+						class="tlab-step"
+						aria-label="Previous NPP month"
+						disabled={npp.idx <= 0}
+						onclick={() => npp.step(-1)}>‹</button
+					>
+					<input
+						type="range"
+						min="0"
+						max={npp.periods.length - 1}
+						step="1"
+						aria-label="NPP month"
+						bind:value={npp.idx}
+					/>
+					<button
+						type="button"
+						class="tlab-step"
+						aria-label="Next NPP month"
+						disabled={npp.idx >= npp.periods.length - 1}
+						onclick={() => npp.step(1)}>›</button
+					>
+				</div>
+				<div class="tlab-snap-ends tlab-xs tlab-muted">
+					<span>{npp.range.first.slice(0, 4)}</span>
+					<span>{npp.range.latest.slice(0, 4)}</span>
+				</div>
+
+				<div class="tlab-legend tlab-mt">
+					<div class="tlab-classes">
+						{#each NPP_COLORS as c}<span style:background={c}></span>{/each}
+					</div>
+					<div class="tlab-legend-ticks tlab-xs tlab-muted">
+						<span>0</span><span>100</span><span>250 gC/m²</span>
+					</div>
+				</div>
+				<label class="tlab-opacity tlab-mt">
+					<span class="tlab-xs tlab-muted">Opacity</span>
+					<input type="range" min="0.1" max="1" step="0.05" bind:value={npp.opacity} />
+				</label>
+
+				<div class="tlab-subcard">
+					<div class="tlab-subcard-title">Selected cell</div>
+					{#if !selectedCellId}
+						<p class="tlab-muted tlab-xs">Click a cell for its NPP and monthly history.</p>
+					{:else if !showNpp}
+						<p class="tlab-muted tlab-xs">Select this layer to load this cell's NPP.</p>
+					{:else if npp.seriesLoading && !npp.series}
+						<p class="tlab-muted tlab-xs">Loading NPP history for this cell…</p>
+					{:else if npp.seriesError}
+						<p class="tlab-status tlab-error">{npp.seriesError}</p>
+					{:else if npp.series}
+						<dl class="tlab-summary">
+							<div>
+								<dt>Cell NPP</dt>
+								<dd>
+									{#if npp.cellValue?.value != null}
+										{npp.cellValue.value.toFixed(1)} <span class="tlab-unit">gC/m²</span>
+									{:else}
+										<span class="tlab-unit">No data</span>
+									{/if}
+								</dd>
+							</div>
+						</dl>
+						{#if npp.seriesLoading}
+							<p class="tlab-muted tlab-xs tlab-mt">Filling older months from WaPOR…</p>
+						{/if}
+						{#if etPanelHidden}
+							<button type="button" class="tlab-link tlab-mt" onclick={() => (etPanelHidden = false)}>
+								Open NPP stats and time series
+							</button>
+						{/if}
+					{/if}
+				</div>
+				<p class="tlab-muted tlab-xs tlab-mt">
+					FAO WaPOR v3 Level 1 net primary production (L1-NPP-M), 300 m, monthly total in grams of carbon
+					per square metre.
+				</p>
+			{/if}
+			{@render sources('npp')}
+		</TLabSection>
+
+		<TLabSection
+			title="Biomass"
+			subtitle="FAO WaPOR v3 · annual TBP, 300 m"
+			swatch="linear-gradient(135deg, {TBP_COLORS[1]}, {TBP_COLORS[5]}, {TBP_COLORS[9]})"
+			exclusive
+			on={showTbp}
+			onToggle={(v) => setDataLayer('tbp', v)}
+			bind:open={openSec.tbp}
+		>
+			{#if tbp.rangeError}
+				<p class="tlab-status tlab-error">WaPOR biomass unavailable: {tbp.rangeError}</p>
+			{:else if !tbp.range || !tbp.period}
+				<p class="tlab-muted tlab-xs">Checking latest biomass layer…</p>
+			{:else}
+				<div class="tlab-snap-head">
+					<span class="tlab-snap-title">Year</span>
+					<strong>{formatPeriod(tbp.period)}</strong>
+				</div>
+				<div class="tlab-snap-row">
+					<button
+						type="button"
+						class="tlab-step"
+						aria-label="Previous biomass year"
+						disabled={tbp.idx <= 0}
+						onclick={() => tbp.step(-1)}>‹</button
+					>
+					<input
+						type="range"
+						min="0"
+						max={tbp.periods.length - 1}
+						step="1"
+						aria-label="Biomass year"
+						bind:value={tbp.idx}
+					/>
+					<button
+						type="button"
+						class="tlab-step"
+						aria-label="Next biomass year"
+						disabled={tbp.idx >= tbp.periods.length - 1}
+						onclick={() => tbp.step(1)}>›</button
+					>
+				</div>
+				<div class="tlab-snap-ends tlab-xs tlab-muted">
+					<span>{tbp.range.first}</span>
+					<span>{tbp.range.latest}</span>
+				</div>
+
+				<div class="tlab-legend tlab-mt">
+					<div class="tlab-classes">
+						{#each TBP_COLORS as c}<span style:background={c}></span>{/each}
+					</div>
+					<div class="tlab-legend-ticks tlab-xs tlab-muted">
+						<span>0</span><span>10k</span><span>35k kg/ha</span>
+					</div>
+				</div>
+				<label class="tlab-opacity tlab-mt">
+					<span class="tlab-xs tlab-muted">Opacity</span>
+					<input type="range" min="0.1" max="1" step="0.05" bind:value={tbp.opacity} />
+				</label>
+
+				<div class="tlab-subcard">
+					<div class="tlab-subcard-title">Selected cell</div>
+					{#if !selectedCellId}
+						<p class="tlab-muted tlab-xs">Click a cell for its annual biomass and yearly history.</p>
+					{:else if !showTbp}
+						<p class="tlab-muted tlab-xs">Select this layer to load this cell's biomass.</p>
+					{:else if tbp.seriesLoading && !tbp.series}
+						<p class="tlab-muted tlab-xs">Loading biomass history for this cell…</p>
+					{:else if tbp.seriesError}
+						<p class="tlab-status tlab-error">{tbp.seriesError}</p>
+					{:else if tbp.series}
+						<dl class="tlab-summary">
+							<div>
+								<dt>Cell biomass</dt>
+								<dd>
+									{#if tbp.cellValue?.value != null}
+										{fmtTbp(tbp.cellValue.value)} <span class="tlab-unit">kg/ha</span>
+									{:else}
+										<span class="tlab-unit">No data</span>
+									{/if}
+								</dd>
+							</div>
+						</dl>
+						{#if tbp.seriesLoading}
+							<p class="tlab-muted tlab-xs tlab-mt">Filling older years from WaPOR…</p>
+						{/if}
+						{#if etPanelHidden}
+							<button type="button" class="tlab-link tlab-mt" onclick={() => (etPanelHidden = false)}>
+								Open biomass stats and time series
+							</button>
+						{/if}
+					{/if}
+				</div>
+				<p class="tlab-muted tlab-xs tlab-mt">
+					FAO WaPOR v3 Level 1 total biomass production (L1-TBP-A), 300 m, dry matter for the calendar
+					year. WaPOR does not publish a monthly TBP layer.
+				</p>
+			{/if}
+			{@render sources('tbp')}
+		</TLabSection>
+
+		<TLabSection
+			title="Water productivity"
+			subtitle="FAO WaPOR v3 · annual GBWP, 300 m"
+			swatch="linear-gradient(135deg, {GBWP_COLORS[1]}, {GBWP_COLORS[5]}, {GBWP_COLORS[9]})"
+			exclusive
+			on={showGbwp}
+			onToggle={(v) => setDataLayer('gbwp', v)}
+			bind:open={openSec.gbwp}
+		>
+			{#if gbwp.rangeError}
+				<p class="tlab-status tlab-error">WaPOR productivity unavailable: {gbwp.rangeError}</p>
+			{:else if !gbwp.range || !gbwp.period}
+				<p class="tlab-muted tlab-xs">Checking latest productivity layer…</p>
+			{:else}
+				<div class="tlab-snap-head">
+					<span class="tlab-snap-title">Year</span>
+					<strong>{formatPeriod(gbwp.period)}</strong>
+				</div>
+				<div class="tlab-snap-row">
+					<button
+						type="button"
+						class="tlab-step"
+						aria-label="Previous productivity year"
+						disabled={gbwp.idx <= 0}
+						onclick={() => gbwp.step(-1)}>‹</button
+					>
+					<input
+						type="range"
+						min="0"
+						max={gbwp.periods.length - 1}
+						step="1"
+						aria-label="Productivity year"
+						bind:value={gbwp.idx}
+					/>
+					<button
+						type="button"
+						class="tlab-step"
+						aria-label="Next productivity year"
+						disabled={gbwp.idx >= gbwp.periods.length - 1}
+						onclick={() => gbwp.step(1)}>›</button
+					>
+				</div>
+				<div class="tlab-snap-ends tlab-xs tlab-muted">
+					<span>{gbwp.range.first}</span>
+					<span>{gbwp.range.latest}</span>
+				</div>
+
+				<div class="tlab-legend tlab-mt">
+					<div class="tlab-classes">
+						{#each GBWP_COLORS as c}<span style:background={c}></span>{/each}
+					</div>
+					<div class="tlab-legend-ticks tlab-xs tlab-muted">
+						<span>0</span><span>1.5</span><span>4 kg/m³</span>
+					</div>
+				</div>
+				<label class="tlab-opacity tlab-mt">
+					<span class="tlab-xs tlab-muted">Opacity</span>
+					<input type="range" min="0.1" max="1" step="0.05" bind:value={gbwp.opacity} />
+				</label>
+
+				<div class="tlab-subcard">
+					<div class="tlab-subcard-title">Selected cell</div>
+					{#if !selectedCellId}
+						<p class="tlab-muted tlab-xs">Click a cell for its water productivity and yearly history.</p>
+					{:else if !showGbwp}
+						<p class="tlab-muted tlab-xs">Select this layer to load this cell's productivity.</p>
+					{:else if gbwp.seriesLoading && !gbwp.series}
+						<p class="tlab-muted tlab-xs">Loading productivity history for this cell…</p>
+					{:else if gbwp.seriesError}
+						<p class="tlab-status tlab-error">{gbwp.seriesError}</p>
+					{:else if gbwp.series}
+						<dl class="tlab-summary">
+							<div>
+								<dt>Cell GBWP</dt>
+								<dd>
+									{#if gbwp.cellValue?.value != null}
+										{gbwp.cellValue.value.toFixed(2)} <span class="tlab-unit">kg/m³</span>
+									{:else}
+										<span class="tlab-unit">No data</span>
+									{/if}
+								</dd>
+							</div>
+						</dl>
+						{#if gbwp.seriesLoading}
+							<p class="tlab-muted tlab-xs tlab-mt">Filling older years from WaPOR…</p>
+						{/if}
+						{#if etPanelHidden}
+							<button type="button" class="tlab-link tlab-mt" onclick={() => (etPanelHidden = false)}>
+								Open productivity stats and time series
+							</button>
+						{/if}
+					{/if}
+				</div>
+				<p class="tlab-muted tlab-xs tlab-mt">
+					FAO WaPOR v3 Level 1 gross biomass water productivity (L1-GBWP-A), 300 m: kilograms of biomass
+					per cubic metre of water consumed (AETI) over the year. Higher is more productive.
+				</p>
+			{/if}
+			{@render sources('gbwp')}
 		</TLabSection>
 
 		<TLabSection
@@ -1238,7 +2131,8 @@
 						{#if cropPlotsOn}
 							Each parcel takes the colour of its largest crop; click a crop to map its share.
 						{:else}
-							District totals from the Raichur scrape. Click a cell to colour its parcels.
+							Each cell takes the colour of its largest crop. Stronger fill means that crop covers more of the
+							cell (~125 ha). Click a cell to colour its parcels.
 						{/if}
 					</p>
 				{/if}
@@ -1377,17 +2271,58 @@
 			{showWucs}
 			{canals}
 			{showCanals}
-			{etMonth}
-			{showEt}
-			{etOpacity}
+			etMonth={showEt
+				? etMonth
+				: showEtWapor
+					? waporMonth
+					: showPcp
+						? pcpMonth
+						: showNpp
+							? npp.period
+							: showTbp
+								? tbp.period
+								: showGbwp
+									? gbwp.period
+									: null}
+			etKind={showEt
+				? 'nrsc'
+				: showEtWapor
+					? 'wapor'
+					: showPcp
+						? 'pcp'
+						: showNpp
+							? 'npp'
+							: showTbp
+								? 'tbp'
+								: showGbwp
+									? 'gbwp'
+									: null}
+			etOpacity={showEt
+				? etOpacity
+				: showEtWapor
+					? waporOpacity
+					: showPcp
+						? pcpOpacity
+						: showNpp
+							? npp.opacity
+							: showTbp
+								? tbp.opacity
+								: gbwp.opacity}
 			{cellFills}
+			cellFillOpacity={
+				showLandscape
+					? landscapeOpacities
+					: (showCrops || waterFromSurvey) && crops.status === 'done' && !crops.focus
+						? crops.fillOpacities
+						: null
+			}
 			{cellTooltip}
 			raster={smRaster}
 			rasterLut={SM_LUT}
 			rasterLabel={smLabel}
 			rasterOpacity={smOpacity}
 			{waterPlots}
-			focusCover={!showWater && !showSm && !showCrops}
+			focusCover={showLandscape}
 			waterPlotColors={water.plotColors}
 			waterSelectedPlot={waterPlots ? water.selectedPlot : null}
 			waterSelectedCrop={waterPlots && water.viewMode === 'group' ? water.selectedCrop : null}
@@ -1452,9 +2387,13 @@
 				seasonKey={water.seasonKey || null}
 				onSeason={(k) => water.setSeason(k)}
 				legendItems={landscapeHudLegend}
-				legendNote={data
-					? `Farm plots coloured by Google's predicted crop${water.seasonKey ? ` · ${water.seasonKey}` : ''}.`
-					: 'Same crop colours as the crop survey and water budget. Click a cell to colour its farm plots.'}
+				legendNote={gapi.status === 'loading' && gapi.total
+					? `Loading Google ALU crops… ${gapi.done.toLocaleString('en-IN')} of ${gapi.total.toLocaleString('en-IN')} cells.`
+					: gapi.status === 'error'
+						? `Google ALU crops unavailable: ${gapi.error}`
+						: data
+							? `Farm plots coloured by Google's predicted crop${water.seasonKey ? ` · ${water.seasonKey}` : ''}. Grid colour is the largest crop in the cell.`
+							: 'Colour is the largest Google ALU crop; stronger fill where it covers more of the cell. Click a cell for farm plots.'}
 			/>
 		{:else if showCrops && crops.status === 'done' && crops.season}
 			<TLabMapHud
@@ -1526,7 +2465,7 @@
 				{/snippet}
 			</svelte:boundary>
 		</div>
-	{:else if showEt && selectedCellId && etRange && !etPanelHidden}
+	{:else if SHOW_NRSC_ET && showEt && selectedCellId && etRange && !etPanelHidden}
 		<div class="tlab-panel-wrap">
 			<svelte:boundary onerror={(e) => reportError(e instanceof Error ? (e.stack ?? e.message) : String(e))}>
 				<TLabEtPanel
@@ -1540,6 +2479,100 @@
 				/>
 				{#snippet failed()}
 					<p class="tlab-status tlab-error">Could not show this cell's ET.</p>
+				{/snippet}
+			</svelte:boundary>
+		</div>
+	{:else if showPcp && selectedCellId && pcpRange && !etPanelHidden}
+		<div class="tlab-panel-wrap">
+			<svelte:boundary onerror={(e) => reportError(e instanceof Error ? (e.stack ?? e.message) : String(e))}>
+				<TLabEtPanel
+					cellToken={selectedToken}
+					months={pcpMonths}
+					series={pcpSeries}
+					loading={pcpSeriesLoading}
+					error={pcpSeriesError}
+					bind:idx={pcpIdx}
+					mode="rain"
+					sourceNote="FAO WaPOR v3 L1-PCP-M (~5 km CHIRPS), monthly rainfall at the centre of this cell."
+					onClose={() => (etPanelHidden = true)}
+				/>
+				{#snippet failed()}
+					<p class="tlab-status tlab-error">Could not show this cell's rainfall.</p>
+				{/snippet}
+			</svelte:boundary>
+		</div>
+	{:else if showEtWapor && selectedCellId && waporRange && !etPanelHidden}
+		<div class="tlab-panel-wrap">
+			<svelte:boundary onerror={(e) => reportError(e instanceof Error ? (e.stack ?? e.message) : String(e))}>
+				<TLabEtPanel
+					cellToken={selectedToken}
+					months={waporMonths}
+					series={waporSeries}
+					loading={waporSeriesLoading}
+					error={waporSeriesError}
+					bind:idx={waporIdx}
+					sourceNote="FAO WaPOR v3 L1-AETI-M (300 m), monthly AETI converted to mm/day, sampled at the centre of this cell."
+					onClose={() => (etPanelHidden = true)}
+				/>
+				{#snippet failed()}
+					<p class="tlab-status tlab-error">Could not show this cell's WaPOR ET.</p>
+				{/snippet}
+			</svelte:boundary>
+		</div>
+	{:else if showNpp && selectedCellId && npp.range && !etPanelHidden}
+		<div class="tlab-panel-wrap">
+			<svelte:boundary onerror={(e) => reportError(e instanceof Error ? (e.stack ?? e.message) : String(e))}>
+				<TLabEtPanel
+					cellToken={selectedToken}
+					months={npp.periods}
+					series={npp.series}
+					loading={npp.seriesLoading}
+					error={npp.seriesError}
+					bind:idx={npp.idx}
+					mode="npp"
+					sourceNote="FAO WaPOR v3 L1-NPP-M (300 m), monthly net primary production in gC/m², sampled at the centre of this cell."
+					onClose={() => (etPanelHidden = true)}
+				/>
+				{#snippet failed()}
+					<p class="tlab-status tlab-error">Could not show this cell's NPP.</p>
+				{/snippet}
+			</svelte:boundary>
+		</div>
+	{:else if showTbp && selectedCellId && tbp.range && !etPanelHidden}
+		<div class="tlab-panel-wrap">
+			<svelte:boundary onerror={(e) => reportError(e instanceof Error ? (e.stack ?? e.message) : String(e))}>
+				<TLabEtPanel
+					cellToken={selectedToken}
+					months={tbp.periods}
+					series={tbp.series}
+					loading={tbp.seriesLoading}
+					error={tbp.seriesError}
+					bind:idx={tbp.idx}
+					mode="biomass"
+					sourceNote="FAO WaPOR v3 L1-TBP-A (300 m), annual total biomass production in kg dry matter per hectare, sampled at the centre of this cell."
+					onClose={() => (etPanelHidden = true)}
+				/>
+				{#snippet failed()}
+					<p class="tlab-status tlab-error">Could not show this cell's biomass.</p>
+				{/snippet}
+			</svelte:boundary>
+		</div>
+	{:else if showGbwp && selectedCellId && gbwp.range && !etPanelHidden}
+		<div class="tlab-panel-wrap">
+			<svelte:boundary onerror={(e) => reportError(e instanceof Error ? (e.stack ?? e.message) : String(e))}>
+				<TLabEtPanel
+					cellToken={selectedToken}
+					months={gbwp.periods}
+					series={gbwp.series}
+					loading={gbwp.seriesLoading}
+					error={gbwp.seriesError}
+					bind:idx={gbwp.idx}
+					mode="wp"
+					sourceNote="FAO WaPOR v3 L1-GBWP-A (300 m), annual gross biomass water productivity in kg/m³, sampled at the centre of this cell."
+					onClose={() => (etPanelHidden = true)}
+				/>
+				{#snippet failed()}
+					<p class="tlab-status tlab-error">Could not show this cell's water productivity.</p>
 				{/snippet}
 			</svelte:boundary>
 		</div>

@@ -7,6 +7,10 @@
 		colorizeGrey,
 		cropColor,
 		etImageUrl,
+		waporMapUrl,
+		isWaporKind,
+		WAPOR_KIND_PRODUCT,
+		WAPOR_ATTR,
 		fieldSeasonCrop,
 		formatCropLabel,
 		loadGreyPixels,
@@ -15,7 +19,8 @@
 		type GreyPixels,
 		type AgriCellResponse,
 		type AgriFeature,
-		type AluType
+		type AluType,
+		type EtKind
 	} from '$lib/tlab';
 	import type { ProcessedGeoJson } from '$lib/gpkgParser';
 	import { WATER_EMPTY } from '$lib/tlabWater.svelte';
@@ -40,10 +45,12 @@
 		canals: GeoJSON.FeatureCollection | null;
 		showCanals: boolean;
 		etMonth: string | null;
-		showEt: boolean;
+		etKind: EtKind | null;
 		etOpacity: number;
 		/** cellId → fill colour of the active cell choropleth (water budget, soil moisture); null hides it */
 		cellFills: Map<string, string> | null;
+		/** Optional per-cell fill opacity (crop survey coverage). Default 1 when omitted. */
+		cellFillOpacity?: Map<string, number> | null;
 		cellTooltip: (cellId: string) => string | null;
 		waterPlots: ProcessedGeoJson | null;
 		/** Zoomed in, cover every cell but the selected one with plain imagery */
@@ -86,9 +93,10 @@
 		canals,
 		showCanals,
 		etMonth,
-		showEt,
+		etKind = null,
 		etOpacity,
 		cellFills,
+		cellFillOpacity = null,
 		cellTooltip,
 		waterPlots,
 		focusCover,
@@ -118,6 +126,7 @@
 	let wucsLayer: Leaflet.GeoJSON | null = null;
 	let canalLayer: Leaflet.GeoJSON | null = null;
 	let etOverlay: Leaflet.SVGOverlay | null = null;
+	let etImageOverlay: Leaflet.ImageOverlay | null = null;
 	// Empty groups that only drive the layer-control checkboxes
 	let pointer = $state<{ x: number; y: number; text: string | null } | null>(null);
 	const readout = $derived(pointer?.text ? pointer : null);
@@ -176,17 +185,30 @@
 		const fill = cellFills?.get(id);
 		if (!fill) return base;
 		// The selected cell's own plots carry the colour, so its fill would only hide them
-		const opacity = (waterPlots != null || cropPlots != null) && id === selectedCellId ? 0 : 1;
-		return { ...base, fillColor: fill, fillOpacity: opacity };
+		if ((waterPlots != null || cropPlotsVisible || fieldPlotsVisible) && id === selectedCellId) {
+			return { ...base, fillColor: fill, fillOpacity: 0 };
+		}
+		return { ...base, fillColor: fill, fillOpacity: cellFillOpacity?.get(id) ?? 1 };
 	}
 
 	function cellHoverStyle(id: string): Leaflet.PathOptions {
 		const fill = cellFills?.get(id);
-		return fill ? { ...gridHoverStyle, fillColor: fill, fillOpacity: 1 } : gridHoverStyle;
+		if (!fill) return gridHoverStyle;
+		const o = cellFillOpacity?.get(id);
+		return { ...gridHoverStyle, fillColor: fill, fillOpacity: o != null ? Math.min(1, o + 0.12) : 1 };
 	}
 
+	let restyleRaf = 0;
 	function restyleCells() {
-		for (const [id, cell] of cellLayers) cell.setStyle(cellStyle(id));
+		if (restyleRaf) return;
+		restyleRaf = requestAnimationFrame(() => {
+			restyleRaf = 0;
+			try {
+				for (const [id, cell] of cellLayers) cell.setStyle(cellStyle(id));
+			} catch {
+				/* Leaflet canvas can drop _ctx while a previous redraw is still in flight */
+			}
+		});
 	}
 
 	const selectionStyle: Leaflet.PathOptions = {
@@ -280,7 +302,7 @@
 	}
 
 	$effect(() => {
-		const fc = cropPlots;
+		const fc = cropPlotsVisible ? cropPlots : null;
 		if (!L || !map) return;
 		const leaflet = L;
 		const m = map;
@@ -463,8 +485,12 @@
 			syncZoomClasses();
 			zoom = m.getZoom();
 			untrack(updateFocusClip);
+			untrack(updateHydroClip);
 		});
-		m.on('viewreset', () => untrack(updateFocusClip));
+		m.on('viewreset', () => {
+			untrack(updateFocusClip);
+			untrack(updateHydroClip);
+		});
 		m.on('moveend', () => {
 			untrack(syncVillageLabels);
 			const b = m.getBounds();
@@ -550,9 +576,12 @@
 
 	$effect(() => {
 		void cellFills;
+		void cellFillOpacity;
 		void showGrid;
 		void waterPlots;
 		void cropPlots;
+		void cropPlotsVisible;
+		void fieldPlotsVisible;
 		void selectedCellId;
 		if (!gridLayer) return;
 		untrack(restyleCells);
@@ -585,6 +614,10 @@
 	let zoom = $state(9);
 	let focusImagery: Leaflet.TileLayer | null = null;
 	const focused = $derived(focusCover && zoom >= FOCUS_ZOOM);
+	/** Cadastral parcels only when they can be seen; otherwise the cell choropleth stays on. */
+	const cropPlotsVisible = $derived(cropPlots != null && zoom >= FOCUS_ZOOM);
+	/** Google ALU farm plots in the selected cell, same zoom rule as crop-survey parcels. */
+	const fieldPlotsVisible = $derived(Boolean(data?.features.length) && Boolean(visible.field) && zoom >= FOCUS_ZOOM);
 
 	function updateFocusClip() {
 		const pane = map?.getPane('tlabFocus');
@@ -601,6 +634,34 @@
 		});
 		const far = 10_000_000;
 		pane.style.clipPath = `path(evenodd, "M${-far} ${-far}H${far}V${far}H${-far}Z ${hole.join(' ')}Z")`;
+	}
+
+	/** Clip the WaPOR image overlay to the district; SVG (NRSC) already clips internally. */
+	function updateHydroClip() {
+		const pane = map?.getPane('tlabHydro');
+		if (!map || !pane || !L) return;
+		if (!isWaporKind(etKind) || !boundary) {
+			pane.style.clipPath = 'none';
+			return;
+		}
+		const m = map;
+		const leaflet = L;
+		const parts: string[] = [];
+		for (const f of boundary.features) {
+			const g = f.geometry;
+			const polys: number[][][][] =
+				g.type === 'Polygon' ? [g.coordinates as number[][][]] : g.type === 'MultiPolygon' ? (g.coordinates as number[][][][]) : [];
+			for (const poly of polys) {
+				for (const ring of poly) {
+					const d = ring.map((c, i) => {
+						const p = m.latLngToLayerPoint(leaflet.latLng(c[1], c[0]));
+						return `${i ? 'L' : 'M'}${p.x.toFixed(1)} ${p.y.toFixed(1)}`;
+					});
+					parts.push(`${d.join(' ')}Z`);
+				}
+			}
+		}
+		pane.style.clipPath = parts.length ? `path(evenodd, "${parts.join(' ')}")` : 'none';
 	}
 
 	// Cell outlines drawn above the imagery cover so other cells stay visible to click;
@@ -723,19 +784,50 @@
 	}
 
 	let etImage: SVGImageElement | null = null;
+	let etOverlayKind: EtKind | null = null;
 
 	$effect(() => {
 		const month = etMonth;
-		const show = showEt;
+		const kind = etKind;
 		const box = districtBox;
 		if (!L || !map) return;
-		if (!month || !show || !box) {
+		if (!month || !kind || !box) {
 			etOverlay?.remove();
+			etImageOverlay?.remove();
+			etOverlayKind = null;
+			untrack(updateHydroClip);
 			return;
 		}
-		if (!etOverlay) {
+		if (isWaporKind(kind)) {
+			etOverlay?.remove();
+			etOverlay = null;
+			etImage = null;
+			const url = waporMapUrl(WAPOR_KIND_PRODUCT[kind], month, box, 900);
+			if (!etImageOverlay || etOverlayKind !== kind) {
+				etImageOverlay?.remove();
+				etImageOverlay = L.imageOverlay(url, box, {
+					pane: 'tlabHydro',
+					interactive: false,
+					className: 'tlab-hydro-img',
+					opacity: untrack(() => etOpacity),
+					attribution: WAPOR_ATTR[kind]
+				});
+				etOverlayKind = kind;
+			} else {
+				etImageOverlay.setUrl(url);
+				etImageOverlay.setBounds(L.latLngBounds(box));
+			}
+			if (!map.hasLayer(etImageOverlay)) etImageOverlay.addTo(map);
+			untrack(updateHydroClip);
+			return;
+		}
+		etImageOverlay?.remove();
+		etImageOverlay = null;
+		if (!etOverlay || etOverlayKind !== kind) {
+			etOverlay?.remove();
 			const { svg, image } = districtSvg(box, 'et');
 			etImage = image;
+			etOverlayKind = kind;
 			etOverlay = L.svgOverlay(svg, box, {
 				pane: 'tlabHydro',
 				interactive: false,
@@ -745,10 +837,12 @@
 		}
 		etImage?.setAttribute('href', etImageUrl(month, box, 900));
 		if (!map.hasLayer(etOverlay)) etOverlay.addTo(map);
+		untrack(updateHydroClip);
 	});
 
 	$effect(() => {
 		etOverlay?.setOpacity(etOpacity);
+		etImageOverlay?.setOpacity(etOpacity);
 	});
 
 	async function rasterFrame(url: string, lut: Uint8ClampedArray) {
