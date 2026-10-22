@@ -18,7 +18,6 @@ from .gapi_crops import router as gapi_crops_router
 from .hydro import router as hydro_router
 from .layers import router as layers_router
 from .raw_crops import router as raw_crops_router
-from .wapor import router as wapor_router
 from .qgz_builder import build_qgz
 
 # Chunked uploads land here (each chunk stays under nginx's default 1m limit)
@@ -38,9 +37,15 @@ app.add_middleware(
 app.include_router(agri_router)
 app.include_router(gapi_crops_router)
 app.include_router(hydro_router)
-app.include_router(wapor_router)
 app.include_router(raw_crops_router)
 app.include_router(layers_router)
+try:
+	from .wapor import router as wapor_router
+
+	app.include_router(wapor_router)
+except Exception as exc:
+	# rasterio/GDAL must not take down /fwa-api/health on deploy
+	print(f"WaPOR router disabled: {exc}", flush=True)
 
 
 @app.post("/fwa-api/client-error")

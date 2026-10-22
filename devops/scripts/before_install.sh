@@ -18,14 +18,18 @@ mkdir -p /opt/welllabs/{releases,logs}
 echo "[2/4] Stopping unattended-upgrades if active..."
 systemctl stop unattended-upgrades || true
 
+# Process name is truncated to unattended-upgr; also wait on the lock files.
 echo "Waiting for apt/dpkg locks to release..."
-for i in {1..20}; do
-  if ! pgrep -f "unattended-upgrades" >/dev/null && \
-     ! pgrep -f "apt-get" >/dev/null && \
-     ! pgrep -f "dpkg" >/dev/null; then
+for i in {1..36}; do
+  if ! fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 \
+    && ! fuser /var/lib/apt/lists/lock >/dev/null 2>&1 \
+    && ! pgrep -f "unattended-upgr" >/dev/null \
+    && ! pgrep -x apt-get >/dev/null \
+    && ! pgrep -x apt >/dev/null \
+    && ! pgrep -x dpkg >/dev/null; then
     break
   fi
-  echo "  Lock active. Waiting 5s (attempt $i/20)..."
+  echo "  Lock active. Waiting 5s (attempt $i/36)..."
   sleep 5
 done
 

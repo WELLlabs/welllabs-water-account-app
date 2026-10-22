@@ -104,13 +104,30 @@ echo "✓ Nginx is running."
 # ── 4. Python runtime + shared venv for FastAPI ──────────────
 echo "[4/7] Ensuring Python venv and API dependencies..."
 
-export DEBIAN_FRONTEND=noninteractive
-apt-get update -qq
-apt-get install -y -qq python3 python3-venv python3-pip
-
+# Skip apt when Python is already there. Every-deploy apt-get races
+# unattended-upgrades (dpkg lock → exit 100 → HEALTH_CONSTRAINTS).
 if [ ! -x "${API_VENV}/bin/python" ]; then
+  echo "  → Python venv missing; installing python3 via apt..."
+  export DEBIAN_FRONTEND=noninteractive
+  systemctl stop unattended-upgrades || true
+  for i in {1..36}; do
+    if ! fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 \
+      && ! fuser /var/lib/apt/lists/lock >/dev/null 2>&1 \
+      && ! pgrep -f "unattended-upgr" >/dev/null \
+      && ! pgrep -x apt-get >/dev/null \
+      && ! pgrep -x apt >/dev/null \
+      && ! pgrep -x dpkg >/dev/null; then
+      break
+    fi
+    echo "  apt lock held. Waiting 5s (attempt $i/36)..."
+    sleep 5
+  done
+  apt-get update -qq
+  apt-get install -y -qq python3 python3-venv python3-pip
   echo "  → Creating venv at ${API_VENV}"
   python3 -m venv "${API_VENV}"
+else
+  echo "  → Reusing existing venv at ${API_VENV} (skipping apt)."
 fi
 
 "${API_VENV}/bin/pip" install --upgrade pip -q
