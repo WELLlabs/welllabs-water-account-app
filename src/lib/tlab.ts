@@ -117,7 +117,9 @@ export function cropColor(crop: string): string {
 }
 
 export function formatCropLabel(crop: string): string {
-	if (crop === 'NO_PREDICTION') return 'No prediction';
+	const k = crop.trim().toLowerCase().replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
+	if (!k || k === 'no prediction') return 'No prediction';
+	if (k === 'unknown' || k === 'unknown crop') return 'Unknown';
 	return formatCrop(crop);
 }
 

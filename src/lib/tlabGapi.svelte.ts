@@ -2,7 +2,7 @@ import { cropColor, formatCropLabel } from './tlab';
 import { coverageOpacity } from './tlabCrops.svelte';
 import { streamRegion, type SummaryRow } from './regionBudget';
 
-const SNAP_URL = '/fwa-api/tlab/gapi-crops';
+const SNAP_URL = '/fwa-api/tlab/gapi-crops?v=2';
 /** Prefer an identified crop, Unknown, or No prediction over these when colouring a cell. */
 const IDLE = new Set(['Fallow', 'Harvested', 'Uncertain']);
 const PINNED = new Set(['Unknown', 'No prediction']);
@@ -15,12 +15,13 @@ export interface GapiCropHa {
 }
 
 export function gapiInsight(areas: GapiCropHa[]) {
-	const farm = areas.reduce((s, a) => s + a.ha, 0);
-	const unknown = areas.find((a) => a.crop === 'Unknown')?.ha ?? 0;
-	const none = areas.find((a) => a.crop === 'No prediction')?.ha ?? 0;
-	const crops = areas.filter((a) => !SKIP.has(a.crop));
+	const named = areas.map((a) => ({ ...a, crop: formatCropLabel(a.crop) }));
+	const farm = named.reduce((s, a) => s + a.ha, 0);
+	const unknown = named.filter((a) => a.crop === 'Unknown').reduce((s, a) => s + a.ha, 0);
+	const none = named.filter((a) => a.crop === 'No prediction').reduce((s, a) => s + a.ha, 0);
+	const crops = named.filter((a) => !SKIP.has(a.crop));
 	const identified = crops.reduce((s, a) => s + a.ha, 0);
-	return { farm, identified, unknown, none, crops, areas };
+	return { farm, identified, unknown, none, crops, areas: named };
 }
 
 function seasonRank(key: string): [number, number] {
@@ -30,24 +31,28 @@ function seasonRank(key: string): [number, number] {
 }
 
 interface GapiSnapshot {
-	version: 1;
+	version: number;
 	generatedAt: string;
 	cells: { id: string; seasons: Record<string, [string, number][]> }[];
 }
 
 function sortAreas(sums: Map<string, number>): GapiCropHa[] {
 	return [...sums]
-		.map(([crop, ha]) => ({ crop, ha }))
+		.map(([crop, ha]) => ({ crop: formatCropLabel(crop), ha }))
 		.sort((a, b) => b.ha - a.ha);
+}
+
+function addHa(sums: Map<string, number>, crop: string, ha: number) {
+	const name = formatCropLabel(crop);
+	sums.set(name, (sums.get(name) ?? 0) + ha);
 }
 
 function foldRows(rows: SummaryRow[], farmSqM = 0): Map<string, GapiCropHa[]> {
 	const bySeason = new Map<string, Map<string, number>>();
 	for (const [key, , code, , , area] of rows) {
-		const crop = formatCropLabel(code || 'NO_PREDICTION');
 		let sums = bySeason.get(key);
 		if (!sums) bySeason.set(key, (sums = new Map()));
-		sums.set(crop, (sums.get(crop) ?? 0) + area / 10_000);
+		addHa(sums, code || 'NO_PREDICTION', area / 10_000);
 	}
 	const farmHa = farmSqM / 10_000;
 	const out = new Map<string, GapiCropHa[]>();
@@ -131,9 +136,9 @@ export class TLabGapi {
 				const sums = bySeason.get(key)!;
 				const areas = seasons.get(key);
 				if (areas?.length) {
-					for (const a of areas) sums.set(a.crop, (sums.get(a.crop) ?? 0) + a.ha);
+					for (const a of areas) addHa(sums, a.crop, a.ha);
 				} else if (farm) {
-					sums.set('No prediction', (sums.get('No prediction') ?? 0) + farm);
+					addHa(sums, 'No prediction', farm);
 				}
 			}
 		}
@@ -212,10 +217,9 @@ export class TLabGapi {
 		for (const c of snap.cells) {
 			const seasons = new Map<string, GapiCropHa[]>();
 			for (const [key, pairs] of Object.entries(c.seasons)) {
-				seasons.set(
-					key,
-					pairs.map(([crop, ha]) => ({ crop, ha })).sort((a, b) => b.ha - a.ha)
-				);
+				const sums = new Map<string, number>();
+				for (const [crop, ha] of pairs) addHa(sums, crop, ha);
+				seasons.set(key, sortAreas(sums));
 			}
 			next.set(c.id, seasons);
 		}
@@ -252,7 +256,7 @@ export class TLabGapi {
 
 	private async save(): Promise<void> {
 		const snap: GapiSnapshot = {
-			version: 1,
+			version: 2,
 			generatedAt: new Date().toISOString(),
 			cells: [...this.byCell].map(([id, seasons]) => ({
 				id,
