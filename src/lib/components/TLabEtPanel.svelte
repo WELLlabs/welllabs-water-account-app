@@ -26,7 +26,7 @@
 		/** Footer attribution; NRSC by default, WaPOR when that layer is on */
 		sourceNote?: string;
 		mode?: HydroPanelMode;
-		onClose: () => void;
+		onClose?: () => void;
 	}
 
 	let {
@@ -36,7 +36,7 @@
 		loading,
 		error,
 		idx = $bindable(),
-		sourceNote = 'NRSC Bhuvan NHP actual ET (SNPP-VIIRS energy balance), 750 m, sampled at the centre of this cell.',
+		sourceNote = 'NRSC Bhuvan NHP actual ET (SNPP-VIIRS energy balance), 750 m.',
 		mode = 'et',
 		onClose
 	}: Props = $props();
@@ -230,21 +230,52 @@
 	const gaps = $derived(points.length - valid.length);
 </script>
 
-<aside class="panel" aria-label="{spec.title} for the selected cell">
+<aside class="panel" aria-label="{spec.title} {cellToken ? 'for the selected cell' : 'district insights'}">
 	<header>
 		<div class="title">
 			<span class="sw" style:background="linear-gradient(135deg, {palette[0]}, {palette[4]}, {palette[9]})"></span>
 			<div>
 				<h2>{spec.title}</h2>
 				<p class="meta">
-					Cell {cellToken ?? '—'} · {annual ? 'annual' : 'monthly'} {spec.noun} at the cell centre
+					{#if cellToken}
+						Cell {cellToken} · {annual ? 'annual' : 'monthly'} {spec.noun} at the cell centre
+					{:else}
+						Raichur district · {annual ? 'annual' : 'monthly'} {spec.noun}
+						{#if months[idx]}<small>{label(months[idx])} on the map</small>{/if}
+					{/if}
 				</p>
 			</div>
 		</div>
-		<button type="button" class="close" onclick={onClose} aria-label="Close {spec.title}">×</button>
+		{#if onClose && cellToken}
+			<button type="button" class="close" onclick={onClose} aria-label="Close {spec.title}">×</button>
+		{/if}
 	</header>
 
-	{#if error}
+	{#if !cellToken}
+		<section>
+			<dl class="facts">
+				<div class="wide">
+					<dt>Map period</dt>
+					<dd class="big">{months[idx] ? label(months[idx]) : '—'}</dd>
+				</div>
+				<div>
+					<dt>Periods</dt>
+					<dd>{months.length.toLocaleString('en-IN')}</dd>
+				</div>
+				<div>
+					<dt>Unit</dt>
+					<dd>{spec.unit}</dd>
+				</div>
+			</dl>
+			<div class="ramp" aria-hidden="true">
+				{#each palette as c}<span style:background={c}></span>{/each}
+			</div>
+			<p class="muted">
+				District map for this {annual ? 'year' : 'month'}. Click a cell for the time series at its centre.
+			</p>
+			<p class="muted">{sourceNote}</p>
+		</section>
+	{:else if error}
 		<section><p class="err">{error}</p></section>
 	{:else if !stats && loading}
 		<section><p class="muted">Loading {spec.noun} history for this cell…</p></section>
@@ -484,6 +515,23 @@
 		margin: 0.15rem 0 0;
 		font-size: 0.75rem;
 		color: #00296bcc;
+	}
+
+	.meta small {
+		display: block;
+		color: #00296b99;
+	}
+
+	.ramp {
+		display: flex;
+		height: 0.55rem;
+		border-radius: 2px;
+		overflow: hidden;
+		margin: 0.7rem 0 0.5rem;
+	}
+
+	.ramp span {
+		flex: 1;
 	}
 
 	.close {

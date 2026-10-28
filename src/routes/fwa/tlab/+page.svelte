@@ -7,13 +7,15 @@
 	import TLabEtPanel from '$lib/components/TLabEtPanel.svelte';
 	import TLabSmPanel from '$lib/components/TLabSmPanel.svelte';
 	import TLabCropPanel from '$lib/components/TLabCropPanel.svelte';
+	import TLabGapiPanel from '$lib/components/TLabGapiPanel.svelte';
+	import TLabWaterDistrictPanel from '$lib/components/TLabWaterDistrictPanel.svelte';
 	import TLabWaterControls, { type WaterCropSource } from '$lib/components/TLabWaterControls.svelte';
 	import TLabMapHud from '$lib/components/TLabMapHud.svelte';
 	import { fmt, fmtAcres } from '$lib/components/cropcalc/format';
 	import { TLabWater, WATER_PALETTE, seasonParts } from '$lib/tlabWater.svelte';
 	import { SM_BREAKS, SM_LUT, SM_PALETTE, TLabSoil, smColor, smFromByte } from '$lib/tlabSoil.svelte';
 	import { FOCUS_BREAKS, TLabCrops, coverageOpacity, cropText, fmtHa, focusRamp, primaryKn } from '$lib/tlabCrops.svelte';
-	import { TLabGapi } from '$lib/tlabGapi.svelte';
+	import { TLabGapi, pinGapiLegend } from '$lib/tlabGapi.svelte';
 	import {
 		LAYERS,
 		DPRVI_BASE,
@@ -214,6 +216,9 @@
 		for (const k of ['water', 'landscape', 'et', 'etWapor', 'pcp', 'npp', 'tbp', 'gbwp', 'sm', 'crops'] as const)
 			openSec[k] = k === layer;
 		if ((hydroLayers as readonly string[]).includes(layer)) etPanelHidden = false;
+		if (layer === 'water') waterPanelHidden = false;
+		if (layer === 'sm') smPanelHidden = false;
+		if (layer === 'crops') cropPanelHidden = false;
 		if (layer === 'water' && water.status === 'error') void water.load();
 	}
 
@@ -836,14 +841,13 @@
 			.sort((a, b) => b[1] - a[1])
 			.map(([crop, n]) => ({ crop, n, label: formatCropLabel(crop), color: cropColor(crop) }));
 	});
-	/** Google ALU prominent crop in the selected cell, hectares of farm plots. */
+	/** Google ALU prominent class in the selected cell, hectares of farm plots. */
 	const landscapeMain = $derived.by(() => {
 		if (!data) return null;
 		const sums = new Map<string, number>();
 		for (const f of data.features) {
 			if (f.properties?.alu_type !== 'field') continue;
-			const crop = fieldSeasonCrop(f.properties.monitoring_prediction, water.seasonKey);
-			if (!crop) continue;
+			const crop = fieldSeasonCrop(f.properties.monitoring_prediction, water.seasonKey) ?? 'NO_PREDICTION';
 			sums.set(crop, (sums.get(crop) ?? 0) + (f.properties.area_sq_m ?? 0) / 10_000);
 		}
 		let crop = '';
@@ -877,19 +881,16 @@
 	}
 	const landscapeHudLegend = $derived(
 		landscapeCrops.length
-			? landscapeCrops.slice(0, 8).map((r) => ({
+			? pinGapiLegend(landscapeCrops).map((r) => ({
 					color: r.color,
 					label: r.label,
 					count: r.n.toLocaleString('en-IN')
 				}))
-			: gapi.district
-					.filter((a) => a.crop !== 'Fallow' && a.crop !== 'Harvested')
-					.slice(0, 8)
-					.map((a) => ({
-						color: cropColor(a.crop),
-						label: a.crop,
-						count: `${fmtHa(a.ha)} ha`
-					}))
+			: pinGapiLegend(gapi.district).map((a) => ({
+					color: cropColor(a.crop),
+					label: a.crop,
+					count: `${fmtHa(a.ha)} ha`
+				}))
 	);
 
 	onMount(async () => {
@@ -2392,8 +2393,8 @@
 					: gapi.status === 'error'
 						? `Google ALU crops unavailable: ${gapi.error}`
 						: data
-							? `Farm plots coloured by Google's predicted crop${water.seasonKey ? ` · ${water.seasonKey}` : ''}. Grid colour is the largest crop in the cell.`
-							: 'Colour is the largest Google ALU crop; stronger fill where it covers more of the cell. Click a cell for farm plots.'}
+							? `Farm plots coloured by Google's predicted crop${water.seasonKey ? ` · ${water.seasonKey}` : ''}. Unknown: ALU could not name the crop. No prediction: no crop call this season (not fallow).`
+							: 'Colour is the largest Google ALU class, including Unknown and No prediction. Unknown: ALU could not name the crop. No prediction: no crop call this season (not fallow).'}
 			/>
 		{:else if showCrops && crops.status === 'done' && crops.season}
 			<TLabMapHud
@@ -2450,7 +2451,16 @@
 				{/snippet}
 			</svelte:boundary>
 		</div>
-	{:else if waterCellShown && !waterPanelHidden}
+	{:else if showLandscape}
+		<div class="tlab-panel-wrap">
+			<svelte:boundary onerror={(e) => reportError(e instanceof Error ? (e.stack ?? e.message) : String(e))}>
+				<TLabGapiPanel {gapi} seasons={water.seasons.map((s) => s.key)} onSeason={(k) => water.setSeason(k)} />
+				{#snippet failed()}
+					<p class="tlab-status tlab-error">Could not show Google ALU district insights.</p>
+				{/snippet}
+			</svelte:boundary>
+		</div>
+	{:else if showWater && waterFromGapi && waterCellShown && !waterPanelHidden}
 		<div class="tlab-panel-wrap">
 			<svelte:boundary onerror={(e) => reportError(e instanceof Error ? (e.stack ?? e.message) : String(e))}>
 				<TLabWaterPanel
@@ -2465,138 +2475,152 @@
 				{/snippet}
 			</svelte:boundary>
 		</div>
-	{:else if SHOW_NRSC_ET && showEt && selectedCellId && etRange && !etPanelHidden}
+	{:else if showWater && waterFromGapi}
+		<div class="tlab-panel-wrap">
+			<svelte:boundary onerror={(e) => reportError(e instanceof Error ? (e.stack ?? e.message) : String(e))}>
+				<TLabWaterDistrictPanel {water} onSeason={(k) => water.setSeason(k)} />
+				{#snippet failed()}
+					<p class="tlab-status tlab-error">Could not show district water budget insights.</p>
+				{/snippet}
+			</svelte:boundary>
+		</div>
+	{:else if SHOW_NRSC_ET && showEt && etRange}
 		<div class="tlab-panel-wrap">
 			<svelte:boundary onerror={(e) => reportError(e instanceof Error ? (e.stack ?? e.message) : String(e))}>
 				<TLabEtPanel
-					cellToken={selectedToken}
+					cellToken={selectedCellId && !etPanelHidden ? selectedToken : null}
 					months={etMonths}
-					series={etSeries}
+					series={selectedCellId && !etPanelHidden ? etSeries : null}
 					loading={etSeriesLoading}
-					error={etSeriesError}
+					error={selectedCellId && !etPanelHidden ? etSeriesError : null}
 					bind:idx={etIdx}
 					onClose={() => (etPanelHidden = true)}
 				/>
 				{#snippet failed()}
-					<p class="tlab-status tlab-error">Could not show this cell's ET.</p>
+					<p class="tlab-status tlab-error">Could not show ET insights.</p>
 				{/snippet}
 			</svelte:boundary>
 		</div>
-	{:else if showPcp && selectedCellId && pcpRange && !etPanelHidden}
+	{:else if showPcp && pcpRange}
 		<div class="tlab-panel-wrap">
 			<svelte:boundary onerror={(e) => reportError(e instanceof Error ? (e.stack ?? e.message) : String(e))}>
 				<TLabEtPanel
-					cellToken={selectedToken}
+					cellToken={selectedCellId && !etPanelHidden ? selectedToken : null}
 					months={pcpMonths}
-					series={pcpSeries}
+					series={selectedCellId && !etPanelHidden ? pcpSeries : null}
 					loading={pcpSeriesLoading}
-					error={pcpSeriesError}
+					error={selectedCellId && !etPanelHidden ? pcpSeriesError : null}
 					bind:idx={pcpIdx}
 					mode="rain"
-					sourceNote="FAO WaPOR v3 L1-PCP-M (~5 km CHIRPS), monthly rainfall at the centre of this cell."
+					sourceNote="FAO WaPOR v3 L1-PCP-M (~5 km CHIRPS), monthly rainfall."
 					onClose={() => (etPanelHidden = true)}
 				/>
 				{#snippet failed()}
-					<p class="tlab-status tlab-error">Could not show this cell's rainfall.</p>
+					<p class="tlab-status tlab-error">Could not show rainfall insights.</p>
 				{/snippet}
 			</svelte:boundary>
 		</div>
-	{:else if showEtWapor && selectedCellId && waporRange && !etPanelHidden}
+	{:else if showEtWapor && waporRange}
 		<div class="tlab-panel-wrap">
 			<svelte:boundary onerror={(e) => reportError(e instanceof Error ? (e.stack ?? e.message) : String(e))}>
 				<TLabEtPanel
-					cellToken={selectedToken}
+					cellToken={selectedCellId && !etPanelHidden ? selectedToken : null}
 					months={waporMonths}
-					series={waporSeries}
+					series={selectedCellId && !etPanelHidden ? waporSeries : null}
 					loading={waporSeriesLoading}
-					error={waporSeriesError}
+					error={selectedCellId && !etPanelHidden ? waporSeriesError : null}
 					bind:idx={waporIdx}
-					sourceNote="FAO WaPOR v3 L1-AETI-M (300 m), monthly AETI converted to mm/day, sampled at the centre of this cell."
+					sourceNote="FAO WaPOR v3 L1-AETI-M (300 m), monthly AETI converted to mm/day."
 					onClose={() => (etPanelHidden = true)}
 				/>
 				{#snippet failed()}
-					<p class="tlab-status tlab-error">Could not show this cell's WaPOR ET.</p>
+					<p class="tlab-status tlab-error">Could not show WaPOR ET insights.</p>
 				{/snippet}
 			</svelte:boundary>
 		</div>
-	{:else if showNpp && selectedCellId && npp.range && !etPanelHidden}
+	{:else if showNpp && npp.range}
 		<div class="tlab-panel-wrap">
 			<svelte:boundary onerror={(e) => reportError(e instanceof Error ? (e.stack ?? e.message) : String(e))}>
 				<TLabEtPanel
-					cellToken={selectedToken}
+					cellToken={selectedCellId && !etPanelHidden ? selectedToken : null}
 					months={npp.periods}
-					series={npp.series}
+					series={selectedCellId && !etPanelHidden ? npp.series : null}
 					loading={npp.seriesLoading}
-					error={npp.seriesError}
+					error={selectedCellId && !etPanelHidden ? npp.seriesError : null}
 					bind:idx={npp.idx}
 					mode="npp"
-					sourceNote="FAO WaPOR v3 L1-NPP-M (300 m), monthly net primary production in gC/m², sampled at the centre of this cell."
+					sourceNote="FAO WaPOR v3 L1-NPP-M (300 m), monthly net primary production in gC/m²."
 					onClose={() => (etPanelHidden = true)}
 				/>
 				{#snippet failed()}
-					<p class="tlab-status tlab-error">Could not show this cell's NPP.</p>
+					<p class="tlab-status tlab-error">Could not show NPP insights.</p>
 				{/snippet}
 			</svelte:boundary>
 		</div>
-	{:else if showTbp && selectedCellId && tbp.range && !etPanelHidden}
+	{:else if showTbp && tbp.range}
 		<div class="tlab-panel-wrap">
 			<svelte:boundary onerror={(e) => reportError(e instanceof Error ? (e.stack ?? e.message) : String(e))}>
 				<TLabEtPanel
-					cellToken={selectedToken}
+					cellToken={selectedCellId && !etPanelHidden ? selectedToken : null}
 					months={tbp.periods}
-					series={tbp.series}
+					series={selectedCellId && !etPanelHidden ? tbp.series : null}
 					loading={tbp.seriesLoading}
-					error={tbp.seriesError}
+					error={selectedCellId && !etPanelHidden ? tbp.seriesError : null}
 					bind:idx={tbp.idx}
 					mode="biomass"
-					sourceNote="FAO WaPOR v3 L1-TBP-A (300 m), annual total biomass production in kg dry matter per hectare, sampled at the centre of this cell."
+					sourceNote="FAO WaPOR v3 L1-TBP-A (300 m), annual total biomass production in kg dry matter per hectare."
 					onClose={() => (etPanelHidden = true)}
 				/>
 				{#snippet failed()}
-					<p class="tlab-status tlab-error">Could not show this cell's biomass.</p>
+					<p class="tlab-status tlab-error">Could not show biomass insights.</p>
 				{/snippet}
 			</svelte:boundary>
 		</div>
-	{:else if showGbwp && selectedCellId && gbwp.range && !etPanelHidden}
+	{:else if showGbwp && gbwp.range}
 		<div class="tlab-panel-wrap">
 			<svelte:boundary onerror={(e) => reportError(e instanceof Error ? (e.stack ?? e.message) : String(e))}>
 				<TLabEtPanel
-					cellToken={selectedToken}
+					cellToken={selectedCellId && !etPanelHidden ? selectedToken : null}
 					months={gbwp.periods}
-					series={gbwp.series}
+					series={selectedCellId && !etPanelHidden ? gbwp.series : null}
 					loading={gbwp.seriesLoading}
-					error={gbwp.seriesError}
+					error={selectedCellId && !etPanelHidden ? gbwp.seriesError : null}
 					bind:idx={gbwp.idx}
 					mode="wp"
-					sourceNote="FAO WaPOR v3 L1-GBWP-A (300 m), annual gross biomass water productivity in kg/m³, sampled at the centre of this cell."
+					sourceNote="FAO WaPOR v3 L1-GBWP-A (300 m), annual gross biomass water productivity in kg/m³."
 					onClose={() => (etPanelHidden = true)}
 				/>
 				{#snippet failed()}
-					<p class="tlab-status tlab-error">Could not show this cell's water productivity.</p>
+					<p class="tlab-status tlab-error">Could not show water productivity insights.</p>
 				{/snippet}
 			</svelte:boundary>
 		</div>
-	{:else if showSm && selectedCellId && soil.status === 'done' && !smPanelHidden}
+	{:else if showSm}
 		<div class="tlab-panel-wrap">
 			<svelte:boundary onerror={(e) => reportError(e instanceof Error ? (e.stack ?? e.message) : String(e))}>
-				<TLabSmPanel {soil} cellId={selectedCellId} cellToken={selectedToken} onClose={() => (smPanelHidden = true)} />
+				<TLabSmPanel
+					{soil}
+					cellId={selectedCellId && !smPanelHidden ? selectedCellId : null}
+					cellToken={selectedCellId && !smPanelHidden ? selectedToken : null}
+					onClose={() => (smPanelHidden = true)}
+				/>
 				{#snippet failed()}
-					<p class="tlab-status tlab-error">Could not show this cell's relative soil moisture.</p>
+					<p class="tlab-status tlab-error">Could not show relative soil moisture insights.</p>
 				{/snippet}
 			</svelte:boundary>
 		</div>
-	{:else if (showCrops || (waterFromSurvey && selectedCellId)) && crops.status === 'done' && crops.season && !cropPanelHidden}
+	{:else if (showCrops || waterFromSurvey) && crops.status === 'done' && crops.season}
 		<div class="tlab-panel-wrap">
 			<svelte:boundary onerror={(e) => reportError(e instanceof Error ? (e.stack ?? e.message) : String(e))}>
 				<TLabCropPanel
 					{crops}
-					cellId={selectedCellId}
-					cellToken={selectedToken}
-					plotId={selectedCropPlot}
-					{plotCodes}
-					cellRing={selectedCellRing}
+					cellId={selectedCellId && !cropPanelHidden ? selectedCellId : null}
+					cellToken={selectedCellId && !cropPanelHidden ? selectedToken : null}
+					plotId={cropPanelHidden ? null : selectedCropPlot}
+					plotCodes={cropPanelHidden ? [] : plotCodes}
+					cellRing={cropPanelHidden ? null : selectedCellRing}
 					onClearPlot={() => (selectedCropPlot = null)}
-					onClose={() => (cropPanelHidden = true)}
+					onClose={selectedCellId && !cropPanelHidden ? () => (cropPanelHidden = true) : undefined}
 				/>
 				{#snippet failed()}
 					<p class="tlab-status tlab-error">Could not show the crop survey statistics.</p>

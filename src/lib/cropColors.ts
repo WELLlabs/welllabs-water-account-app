@@ -46,9 +46,9 @@ const COLOR: Record<string, string> = {
 	harvested: '#e7e5e4',
 	'not recorded': '#f1f5f9',
 	'non agricultural': '#a8a29e',
-	'unknown crop': '#94a3b8',
-	unknown: '#94a3b8',
-	'no prediction': '#cbd5e1'
+	'unknown crop': '#7dd3fc',
+	unknown: '#7dd3fc',
+	'no prediction': '#94a3b8'
 };
 
 const SPARE = [

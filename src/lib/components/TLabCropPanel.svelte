@@ -9,7 +9,7 @@
 		plotCodes?: string[];
 		cellRing?: CellRing | null;
 		onClearPlot?: () => void;
-		onClose: () => void;
+		onClose?: () => void;
 	}
 
 	let { crops, cellId, cellToken, plotId = null, plotCodes = [], cellRing = null, onClearPlot, onClose }: Props = $props();
@@ -96,7 +96,9 @@
 				</p>
 			</div>
 		</div>
-		<button type="button" class="close" onclick={onClose} aria-label="Close crop survey statistics">×</button>
+		{#if onClose}
+			<button type="button" class="close" onclick={onClose} aria-label="Close crop survey statistics">×</button>
+		{/if}
 	</header>
 
 	{#if plot}

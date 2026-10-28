@@ -121,16 +121,23 @@ export function formatCropLabel(crop: string): string {
 	return formatCrop(crop);
 }
 
-/** Leading predicted crop for a season key ("Kharif 2025"); latest season if key is omitted. */
+/** Leading ALU label for a season key ("Kharif 2025"); latest season if key is omitted.
+ *  Unknown and No prediction are real classes — not fallow. */
 export function fieldSeasonCrop(
 	preds: MonitoringPrediction[] | undefined,
 	seasonKey?: string | null
 ): string | null {
-	const bars = seasonBars(preds);
-	if (!bars.length) return null;
-	const bar = seasonKey ? bars.find((b) => `${b.season} ${b.year}` === seasonKey) : bars.at(-1);
-	const crop = bar?.segments[0]?.crop;
-	if (!crop || crop === 'UNKNOWN_CROP' || crop === 'NO_PREDICTION') return null;
+	const list = [...(preds ?? [])].sort((a, b) => a.start_timestamp_sec - b.start_timestamp_sec);
+	if (!list.length) return seasonKey ? 'NO_PREDICTION' : null;
+	const pred = seasonKey
+		? list.find((p) => {
+				const { season, year } = seasonLabel(p.start_timestamp_sec);
+				return `${season} ${year}` === seasonKey;
+			})
+		: list.at(-1);
+	if (!pred) return seasonKey ? 'NO_PREDICTION' : null;
+	const crop = pred.crop_1;
+	if (!crop || crop === 'NO_PREDICTION') return 'NO_PREDICTION';
 	return crop;
 }
 
@@ -167,6 +174,10 @@ export function seasonBars(preds: MonitoringPrediction[] | undefined): SeasonBar
 			for (const i of [1, 2, 3] as const) {
 				const crop = p[`crop_${i}`];
 				const conf = p[`conf_${i}`];
+				if (i === 1 && (!crop || crop === 'NO_PREDICTION')) {
+					segments.push({ crop: 'NO_PREDICTION', conf: conf && conf > 0 ? conf : 1 });
+					break;
+				}
 				if (crop && conf != null && conf > 0) segments.push({ crop, conf });
 			}
 			const total = segments.reduce((s, x) => s + x.conf, 0);

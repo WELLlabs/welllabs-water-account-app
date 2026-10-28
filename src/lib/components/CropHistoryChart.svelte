@@ -105,7 +105,9 @@
 			{#each legend as crop}
 				<li><span class="sw" style:background={cropColor(crop)}></span>{formatCropLabel(crop)}</li>
 			{/each}
-			<li><span class="sw" style:background={UNCERTAIN_COLOR}></span>Other / uncertain</li>
+			{#if bars.some((b) => b.uncertain > 0.005)}
+				<li><span class="sw" style:background={UNCERTAIN_COLOR}></span>Other / uncertain</li>
+			{/if}
 		</ul>
 
 		{#if detail}

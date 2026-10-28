@@ -988,6 +988,18 @@
 		layer.on('click', () => onFeatureSelect(feature));
 	}
 
+	function fieldCropTip(crop: string | null): string {
+		if (!crop) return '<span style="color:#64748b">No crop prediction this season</span>';
+		const name = formatCropLabel(crop);
+		if (crop === 'UNKNOWN_CROP' || name === 'Unknown') {
+			return `<strong>${name}</strong><br><span style="color:#64748b">ALU ran a crop call but could not name the crop</span>`;
+		}
+		if (crop === 'NO_PREDICTION' || name === 'No prediction') {
+			return `<strong>${name}</strong><br><span style="color:#64748b">No crop call this season. This is not fallow.</span>`;
+		}
+		return `<strong>${name}</strong>`;
+	}
+
 	function fieldStyle(feature: AgriFeature): Leaflet.PathOptions {
 		const crop = fieldSeasonCrop(feature.properties?.monitoring_prediction, fieldCropSeason);
 		const fill = crop ? cropColor(crop) : UNCERTAIN_COLOR;
@@ -1025,12 +1037,7 @@
 					const path = layer as Leaflet.Path;
 					const base = fieldStyle(f);
 					const crop = fieldSeasonCrop(f.properties?.monitoring_prediction, fieldCropSeason);
-					path.bindTooltip(
-						crop
-							? `<strong>${formatCropLabel(crop)}</strong>`
-							: '<span style="color:#64748b">No crop prediction this season</span>',
-						{ sticky: true, className: 'tlab-canal-tip' }
-					);
+					path.bindTooltip(fieldCropTip(crop), { sticky: true, className: 'tlab-canal-tip' });
 					registerFeature(f, path, base);
 				}
 			});

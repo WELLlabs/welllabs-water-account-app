@@ -1,11 +1,11 @@
 <script lang="ts">
-	import { SM_PALETTE, smColor, type TLabSoil } from '$lib/tlabSoil.svelte';
+	import { SM_BREAKS, SM_PALETTE, smColor, type TLabSoil } from '$lib/tlabSoil.svelte';
 
 	interface Props {
 		soil: TLabSoil;
-		cellId: string;
+		cellId: string | null;
 		cellToken: string | null;
-		onClose: () => void;
+		onClose?: () => void;
 	}
 
 	let { soil, cellId, cellToken, onClose }: Props = $props();
@@ -17,8 +17,8 @@
 	const Y_MAX = 100;
 	const CLIM_H = 70;
 
-	const obs = $derived(soil.status === 'done' ? soil.series(cellId) : []);
-	const current = $derived(soil.status === 'done' ? soil.cellValue(cellId) : null);
+	const obs = $derived(soil.status === 'done' && cellId ? soil.series(cellId) : []);
+	const current = $derived(soil.status === 'done' && cellId ? soil.cellValue(cellId) : null);
 
 	function label(month: string): string {
 		return `${MONTHS[Number(month.slice(5, 7)) - 1]} ${month.slice(0, 4)}`;
@@ -110,23 +110,78 @@
 	}
 </script>
 
-<aside class="panel" aria-label="Relative soil moisture for the selected cell">
+<aside class="panel" aria-label="Relative soil moisture {cellId ? 'for the selected cell' : 'district insights'}">
 	<header>
 		<div class="title">
 			<span class="sw" style:background="linear-gradient(135deg, {SM_PALETTE[1]}, {SM_PALETTE[4]}, {SM_PALETTE[7]})"></span>
 			<div>
 				<h2>Relative soil moisture</h2>
 				<p class="meta">
-					Cell {cellToken ?? '—'} · surface, top ~5 cm
-					<small>Sentinel-1 radar, mean of the cell's {soil.resolutionM} m pixels</small>
+					{#if cellToken}
+						Cell {cellToken} · surface, top ~5 cm
+						<small>Sentinel-1 radar, mean of the cell's {soil.resolutionM} m pixels</small>
+					{:else}
+						Raichur district · surface, top ~5 cm
+						{#if soil.date}<small>{formatDay(soil.date)} on the map</small>{/if}
+					{/if}
 				</p>
 			</div>
 		</div>
-		<button type="button" class="close" onclick={onClose} aria-label="Close relative soil moisture">×</button>
+		{#if onClose && cellId}
+			<button type="button" class="close" onclick={onClose} aria-label="Close relative soil moisture">×</button>
+		{/if}
 	</header>
 
-	{#if soil.status !== 'done'}
+	{#if soil.status === 'error'}
+		<section><p class="muted">Relative soil moisture unavailable: {soil.error}</p></section>
+	{:else if soil.status !== 'done'}
 		<section><p class="muted">Loading relative soil moisture…</p></section>
+	{:else if !cellId}
+		<section>
+			<dl class="facts">
+				<div class="wide">
+					<dt>Map pass</dt>
+					<dd class="big">{soil.date ? formatDay(soil.date) : '—'}</dd>
+				</div>
+				<div>
+					<dt>District mean</dt>
+					<dd>
+						{#if soil.pass?.mean != null}
+							<span class="chip" style:background={smColor(soil.pass.mean)}></span>{soil.pass.mean.toFixed(0)}<small class="inline">%</small>
+						{:else}—{/if}
+					</dd>
+				</div>
+				<div>
+					<dt>District cover</dt>
+					<dd>{soil.pass ? `${Math.round(soil.pass.cover * 100)}%` : '—'}</dd>
+				</div>
+				<div>
+					<dt>Passes</dt>
+					<dd>{soil.passes.length.toLocaleString('en-IN')}</dd>
+				</div>
+				<div>
+					<dt>Resolution</dt>
+					<dd>{soil.resolutionM} m</dd>
+				</div>
+			</dl>
+			<ul class="classes">
+				{#each SM_PALETTE as color, i (i)}
+					<li>
+						<span class="chip sm" style:background={color}></span>
+						{#if i === 0}
+							&lt; {SM_BREAKS[0]}%
+						{:else if i === SM_PALETTE.length - 1}
+							≥ {SM_BREAKS.at(-1)}%
+						{:else}
+							{SM_BREAKS[i - 1]}–{SM_BREAKS[i]}%
+						{/if}
+					</li>
+				{/each}
+			</ul>
+			<p class="muted">
+				Sentinel-1 radar, relative surface wetness of the top ~5 cm. Click a cell for its time series.
+			</p>
+		</section>
 	{:else if !stats}
 		<section>
 			<p class="muted">
@@ -390,6 +445,22 @@
 
 	.facts .wide {
 		grid-column: 1 / -1;
+	}
+
+	.classes {
+		list-style: none;
+		margin: 0.75rem 0 0.5rem;
+		padding: 0;
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		gap: 0.2rem 0.6rem;
+		font-size: 0.72rem;
+	}
+
+	.classes li {
+		display: flex;
+		align-items: center;
+		gap: 0.25rem;
 	}
 
 	dt {

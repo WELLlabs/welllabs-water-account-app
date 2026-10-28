@@ -75,11 +75,20 @@ def gapi_crops(cells: dict[str, dict]) -> dict:
         by_season: dict[str, dict[str, float]] = {}
         for row in cell.get("rows") or []:
             key, _month, code, _band, _plots, area = row
-            if not code or code in ("NO_PREDICTION", "UNKNOWN_CROP"):
-                continue
-            name = " ".join(p.capitalize() for p in str(code).lower().split("_"))
+            if not code or code == "NO_PREDICTION":
+                name = "No prediction"
+            elif code == "UNKNOWN_CROP":
+                name = "Unknown"
+            else:
+                name = " ".join(p.capitalize() for p in str(code).lower().split("_"))
             season = by_season.setdefault(key, {})
             season[name] = season.get(name, 0.0) + (area or 0) / 10_000
+        farm_ha = (cell.get("area") or 0) / 10_000
+        if farm_ha > 0:
+            for sums in by_season.values():
+                rest = farm_ha - sum(sums.values())
+                if rest > 0.05:
+                    sums["No prediction"] = sums.get("No prediction", 0.0) + rest
         if not by_season:
             continue
         out.append(
