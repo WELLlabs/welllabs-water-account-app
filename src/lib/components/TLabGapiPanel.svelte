@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { Snippet } from 'svelte';
 	import { cropColor } from '$lib/tlab';
 	import { fmtHa } from '$lib/tlabCrops.svelte';
 	import { gapiInsight, pinGapiLegend, type TLabGapi } from '$lib/tlabGapi.svelte';
@@ -8,9 +9,13 @@
 		gapi: TLabGapi;
 		seasons: string[];
 		onSeason: (key: string) => void;
+		/** Selected-cell detail shown above the district insights */
+		children?: Snippet;
+		/** Wider panel for the selected-cell crop calendar */
+		wide?: boolean;
 	}
 
-	let { gapi, seasons, onSeason }: Props = $props();
+	let { gapi, seasons, onSeason, children, wide = false }: Props = $props();
 
 	const TOP = 6;
 	const insight = $derived(gapi.insight);
@@ -48,7 +53,7 @@
 	}
 </script>
 
-<aside class="panel" aria-label="Google ALU district insights">
+<aside class="panel" class:wide aria-label="Google ALU district insights">
 	<header>
 		<div class="title">
 			<span class="sw" style:background="linear-gradient(135deg, #db2777, #2563eb, #7dd3fc)"></span>
@@ -63,6 +68,8 @@
 			</div>
 		</div>
 	</header>
+
+	{@render children?.()}
 
 	{#if gapi.status === 'error'}
 		<section>
@@ -189,6 +196,7 @@
 	.panel {
 		width: 23rem;
 		flex-shrink: 0;
+		transition: width 0.15s ease;
 		overflow-y: auto;
 		background: white;
 		border-left: 1px solid color-mix(in srgb, #00296b 12%, white);
@@ -404,8 +412,13 @@
 		border-radius: 0.1rem;
 	}
 
+	.panel.wide {
+		width: clamp(26rem, 36vw, 38rem);
+	}
+
 	@media (max-width: 768px) {
-		.panel {
+		.panel,
+		.panel.wide {
 			width: 100%;
 			border-left: none;
 			border-top: 1px solid color-mix(in srgb, #00296b 12%, white);

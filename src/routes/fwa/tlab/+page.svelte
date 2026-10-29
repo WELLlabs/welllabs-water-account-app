@@ -9,6 +9,8 @@
 	import TLabCropPanel from '$lib/components/TLabCropPanel.svelte';
 	import TLabGapiPanel from '$lib/components/TLabGapiPanel.svelte';
 	import TLabWaterDistrictPanel from '$lib/components/TLabWaterDistrictPanel.svelte';
+	import TLabCropStage from '$lib/components/TLabCropStage.svelte';
+	import { stageContext } from '$lib/tlabStage';
 	import TLabWaterControls, { type WaterCropSource } from '$lib/components/TLabWaterControls.svelte';
 	import TLabMapHud from '$lib/components/TLabMapHud.svelte';
 	import { fmt, fmtAcres } from '$lib/components/cropcalc/format';
@@ -2444,6 +2446,10 @@
 					feature={selectedFeature}
 					cellToken={selectedToken}
 					seasonKey={water.seasonKey || null}
+					stageCtx={data ? stageContext(data.features) : null}
+					onSeason={(k) => {
+						if (water.seasons.some((s) => s.key === k)) water.setSeason(k);
+					}}
 					onClose={() => (selectedFeature = null)}
 				/>
 				{#snippet failed()}
@@ -2454,7 +2460,16 @@
 	{:else if showLandscape}
 		<div class="tlab-panel-wrap">
 			<svelte:boundary onerror={(e) => reportError(e instanceof Error ? (e.stack ?? e.message) : String(e))}>
-				<TLabGapiPanel {gapi} seasons={water.seasons.map((s) => s.key)} onSeason={(k) => water.setSeason(k)} />
+				<TLabGapiPanel
+					{gapi}
+					seasons={water.seasons.map((s) => s.key)}
+					onSeason={(k) => water.setSeason(k)}
+					wide={Boolean(data && selectedCellId)}
+				>
+					{#if data && selectedCellId}
+						<TLabCropStage features={data.features} seasonKey={water.seasonKey || null} cellToken={selectedToken} />
+					{/if}
+				</TLabGapiPanel>
 				{#snippet failed()}
 					<p class="tlab-status tlab-error">Could not show Google ALU district insights.</p>
 				{/snippet}
@@ -2640,7 +2655,8 @@
 
 	.tlab-side {
 		width: 19.5rem;
-		flex-shrink: 0;
+		flex-shrink: 1;
+		min-width: 15rem;
 		overflow-y: auto;
 		border-right: 1px solid color-mix(in srgb, #00296b 12%, white);
 		background: #f8fafc;
@@ -3098,7 +3114,7 @@
 	.tlab-map-wrap {
 		position: relative;
 		flex: 1;
-		min-width: 0;
+		min-width: min(24rem, 36vw);
 	}
 
 	.tlab-map-loading {
@@ -3125,6 +3141,12 @@
 	.tlab-panel-wrap {
 		display: flex;
 		min-height: 0;
+		min-width: 0;
+		flex-shrink: 1;
+	}
+
+	.tlab-panel-wrap > :global(aside) {
+		max-width: 100%;
 	}
 
 	.tlab-map-failed {

@@ -13,6 +13,7 @@
 		WAPOR_ATTR,
 		fieldSeasonCrop,
 		formatCropLabel,
+		formatDate,
 		loadGreyPixels,
 		canalStyle,
 		UNCERTAIN_COLOR,
@@ -22,6 +23,7 @@
 		type AluType,
 		type EtKind
 	} from '$lib/tlab';
+	import { STAGE_BY_ID, plotStage, stageContext, stageText, type PlotStage } from '$lib/tlabStage';
 	import type { ProcessedGeoJson } from '$lib/gpkgParser';
 	import { WATER_EMPTY } from '$lib/tlabWater.svelte';
 
@@ -473,15 +475,17 @@
 		leaflet.control.layers({ Satellite: imagery, Streets: osm }, undefined, { position: 'topright' }).addTo(m);
 		leaflet.control.scale({ imperial: false }).addTo(m);
 
+		// bind:this clears mapContainer on destroy while Leaflet can still fire a pending zoom
+		const el = mapContainer;
 		const syncZoomClasses = () => {
-			mapContainer.classList.toggle('tlab-zoomed-out', m.getZoom() < 12);
+			el.classList.toggle('tlab-zoomed-out', m.getZoom() < 12);
 		};
 		m.on('zoomstart', () => {
-			mapContainer.classList.add('tlab-zooming');
+			el.classList.add('tlab-zooming');
 			untrack(clearVillageLabels);
 		});
 		m.on('zoomend', () => {
-			mapContainer.classList.remove('tlab-zooming');
+			el.classList.remove('tlab-zooming');
 			syncZoomClasses();
 			zoom = m.getZoom();
 			untrack(updateFocusClip);
@@ -505,7 +509,7 @@
 		syncZoomClasses();
 
 		resizeObserver = new ResizeObserver(() => m.invalidateSize());
-		resizeObserver.observe(mapContainer);
+		resizeObserver.observe(el);
 
 		L = leaflet;
 		map = m;
@@ -515,6 +519,8 @@
 
 	onDestroy(() => {
 		resizeObserver?.disconnect();
+		map?.off();
+		map?.stop();
 		map?.remove();
 		map = null;
 	});
@@ -988,16 +994,20 @@
 		layer.on('click', () => onFeatureSelect(feature));
 	}
 
-	function fieldCropTip(crop: string | null): string {
+	function fieldCropTip(crop: string | null, stage: PlotStage | null): string {
 		if (!crop) return '<span style="color:#64748b">No crop prediction this season</span>';
 		const name = formatCropLabel(crop);
-		if (crop === 'UNKNOWN_CROP' || name === 'Unknown') {
-			return `<strong>${name}</strong><br><span style="color:#64748b">ALU ran a crop call but could not name the crop</span>`;
-		}
 		if (crop === 'NO_PREDICTION' || name === 'No prediction') {
 			return `<strong>${name}</strong><br><span style="color:#64748b">No crop call this season. This is not fallow.</span>`;
 		}
-		return `<strong>${name}</strong>`;
+		const stageLine =
+			stage && stage.stage !== 'none'
+				? `<br><span style="color:${STAGE_BY_ID[stage.stage].color}">■</span> ${stageText(stage)}<br><span style="color:#64748b">Sown ${formatDate(stage.sowingSec ?? undefined)}</span>`
+				: '';
+		if (crop === 'UNKNOWN_CROP' || name === 'Unknown') {
+			return `<strong>${name}</strong><br><span style="color:#64748b">ALU ran a crop call but could not name the crop</span>${stageLine}`;
+		}
+		return `<strong>${name}</strong>${stageLine}`;
 	}
 
 	function fieldStyle(feature: AgriFeature): Leaflet.PathOptions {
@@ -1029,6 +1039,7 @@
 		}
 
 		if (type === 'field') {
+			const ctx = fieldCropSeason ? stageContext(features) : null;
 			return leaflet.geoJSON(features as GeoJSON.Feature[], <RenderedGeoJSONOptions>{
 				renderer: vectorRenderer!,
 				style: (f) => fieldStyle(f as AgriFeature),
@@ -1037,7 +1048,8 @@
 					const path = layer as Leaflet.Path;
 					const base = fieldStyle(f);
 					const crop = fieldSeasonCrop(f.properties?.monitoring_prediction, fieldCropSeason);
-					path.bindTooltip(fieldCropTip(crop), { sticky: true, className: 'tlab-canal-tip' });
+					const stage = ctx ? plotStage(f.properties?.monitoring_prediction, fieldCropSeason, ctx) : null;
+					path.bindTooltip(fieldCropTip(crop, stage), { sticky: true, className: 'tlab-canal-tip' });
 					registerFeature(f, path, base);
 				}
 			});

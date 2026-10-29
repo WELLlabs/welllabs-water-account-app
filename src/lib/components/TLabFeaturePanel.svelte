@@ -12,15 +12,19 @@
 		UNCERTAIN_COLOR,
 		type AgriFeature
 	} from '$lib/tlab';
+	import TLabPlotTimeline from '$lib/components/TLabPlotTimeline.svelte';
+	import { STAGE_BY_ID, plotStage, type StageContext } from '$lib/tlabStage';
 
 	interface Props {
 		feature: AgriFeature;
 		cellToken: string | null;
 		seasonKey?: string | null;
+		stageCtx?: StageContext | null;
+		onSeason?: (key: string) => void;
 		onClose: () => void;
 	}
 
-	let { feature, cellToken, seasonKey = null, onClose }: Props = $props();
+	let { feature, cellToken, seasonKey = null, stageCtx = null, onSeason, onClose }: Props = $props();
 
 	const attrs = $derived(feature.properties ?? { alu_type: 'unknown' });
 	const def = $derived(LAYER_BY_TYPE[attrs.alu_type]);
@@ -28,6 +32,9 @@
 	const bars = $derived(seasonBars(attrs.monitoring_prediction));
 	const seasonCrop = $derived(
 		attrs.alu_type === 'field' ? fieldSeasonCrop(attrs.monitoring_prediction, seasonKey) : null
+	);
+	const stage = $derived(
+		attrs.alu_type === 'field' ? plotStage(attrs.monitoring_prediction, seasonKey, stageCtx) : null
 	);
 	const swatch = $derived(
 		seasonCrop ? cropColor(seasonCrop) : def?.color ?? UNCERTAIN_COLOR
@@ -65,7 +72,7 @@
 	}
 </script>
 
-<aside class="panel" aria-label="Feature details">
+<aside class="panel" class:wide={attrs.alu_type === 'field'} aria-label="Feature details">
 	<header>
 		<div class="title">
 			<span class="sw" style:background={swatch}></span>
@@ -105,6 +112,25 @@
 				<dt>Seasons tracked</dt>
 				<dd>{bars.length || '—'}</dd>
 			</div>
+			{#if stage}
+				<div class="wide">
+					<dt>Crop stage · {seasonKey} (Google AMED)</dt>
+					<dd>
+						<span class="sw sm" style:background={STAGE_BY_ID[stage.stage].color}></span>
+						{STAGE_BY_ID[stage.stage].label}
+						{#if stage.stage !== 'none'}
+							<small>
+								Sown {formatDate(stage.sowingSec ?? undefined)} ·
+								{#if stage.ongoing}
+									day {stage.day} of ~{stage.typicalDays}; in the field at the {formatDate(stage.endSec ?? undefined)} refresh
+								{:else}
+									harvested {formatDate(stage.endSec ?? undefined)} after {stage.day} days
+								{/if}
+							</small>
+						{/if}
+					</dd>
+				</div>
+			{/if}
 			{#if topCrop}
 				<div class="wide">
 					<dt>Most frequent crop</dt>
@@ -133,6 +159,12 @@
 
 	{#if attrs.alu_type === 'field'}
 		<section>
+			<h3>Sowing to harvest</h3>
+			<p class="sub">Google AMED crop seasons for this plot, split into growth stages</p>
+			<TLabPlotTimeline preds={attrs.monitoring_prediction} ctx={stageCtx} {seasonKey} {onSeason} />
+		</section>
+
+		<section>
 			<h3>Crops grown by season</h3>
 			<p class="sub">Model confidence for the top 3 predicted crops in each season</p>
 			<CropHistoryChart {bars} />
@@ -160,6 +192,7 @@
 	.panel {
 		width: 22rem;
 		flex-shrink: 0;
+		transition: width 0.15s ease;
 		overflow-y: auto;
 		background: white;
 		border-left: 1px solid color-mix(in srgb, #00296b 12%, white);
@@ -331,8 +364,13 @@
 		width: 1%;
 	}
 
+	.panel.wide {
+		width: clamp(26rem, 36vw, 38rem);
+	}
+
 	@media (max-width: 768px) {
-		.panel {
+		.panel,
+		.panel.wide {
 			width: 100%;
 			border-left: none;
 			border-top: 1px solid color-mix(in srgb, #00296b 12%, white);
