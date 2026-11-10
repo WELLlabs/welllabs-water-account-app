@@ -21,6 +21,9 @@ export class TLabWaporLayer {
 	seriesLoading = $state(false);
 	seriesError = $state<string | null>(null);
 
+	/** Explorer extent (`west,south,east,north`); null uses the Raichur extract */
+	extent: string | null = null;
+
 	private seriesKey = '';
 	private ctrl: AbortController | null = null;
 
@@ -98,6 +101,7 @@ export class TLabWaporLayer {
 				start: first,
 				end: latest
 			});
+			if (this.extent) params.set('extent', this.extent);
 			while (!ctrl.signal.aborted) {
 				const res = await fetch(`/fwa-api/hydro/wapor/series?${params}`, {
 					signal: ctrl.signal,

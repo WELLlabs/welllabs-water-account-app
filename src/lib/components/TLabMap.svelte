@@ -75,6 +75,10 @@
 		fieldCropSeason?: string | null;
 		/** Map extent and zoom after every move */
 		onView?: (bounds: [[number, number], [number, number]], zoom: number) => void;
+		/** Explorer extent passed to WaPOR requests; null uses the Raichur extract */
+		waporExtent?: string | null;
+		/** Centre and zoom before a boundary is fitted */
+		initialView?: { center: [number, number]; zoom: number };
 	}
 
 	let {
@@ -116,7 +120,9 @@
 		selectedCropPlot = null,
 		onCropPlotSelect = () => {},
 		fieldCropSeason = null,
-		onView = () => {}
+		onView = () => {},
+		waporExtent = null,
+		initialView = { center: [16.2, 76.9], zoom: 9 }
 	}: Props = $props();
 
 	const RASTER_CACHE = 40;
@@ -429,7 +435,9 @@
 
 	onMount(async () => {
 		const leaflet = await import('leaflet');
-		const m = leaflet.map(mapContainer, { preferCanvas: true }).setView([16.2, 76.9], 9);
+		const m = leaflet
+			.map(mapContainer, { preferCanvas: true })
+			.setView(untrack(() => initialView.center), untrack(() => initialView.zoom));
 
 		m.createPane('tlabVectors').style.zIndex = '410';
 		m.createPane('tlabBoundary').style.zIndex = '415';
@@ -808,7 +816,7 @@
 			etOverlay?.remove();
 			etOverlay = null;
 			etImage = null;
-			const url = waporMapUrl(WAPOR_KIND_PRODUCT[kind], month, box, 900);
+			const url = waporMapUrl(WAPOR_KIND_PRODUCT[kind], month, box, 900, waporExtent);
 			if (!etImageOverlay || etOverlayKind !== kind) {
 				etImageOverlay?.remove();
 				etImageOverlay = L.imageOverlay(url, box, {

@@ -338,7 +338,21 @@ export const WAPOR_ATTR: Record<Exclude<EtKind, 'nrsc'>, string> = {
 	gbwp: 'Water productivity © FAO WaPOR v3 (L1-GBWP-A, 300 m)'
 };
 
-export function waporMapUrl(product: WaporProduct, period: string, bounds: LatLngBox, width: number): string {
+/** Explorer extent for WaPOR requests (`west,south,east,north`); null keeps the server's Raichur extract */
+export function waporExtentParam(bounds: [number, number, number, number] | null): string | null {
+	if (!bounds) return null;
+	const pad = 0.02;
+	const [w, s, e, n] = bounds;
+	return [w - pad, s - pad, e + pad, n + pad].map((v) => v.toFixed(4)).join(',');
+}
+
+export function waporMapUrl(
+	product: WaporProduct,
+	period: string,
+	bounds: LatLngBox,
+	width: number,
+	extent: string | null = null
+): string {
 	const [[s, w], [n, e]] = bounds;
 	const height = Math.max(1, Math.round((width * (n - s)) / (e - w)));
 	const params = new URLSearchParams({
@@ -348,6 +362,7 @@ export function waporMapUrl(product: WaporProduct, period: string, bounds: LatLn
 		width: String(width),
 		height: String(height)
 	});
+	if (extent) params.set('extent', extent);
 	return `/fwa-api/hydro/wapor/map.png?${params}`;
 }
 

@@ -1,6 +1,6 @@
 import { cropColor, formatCropLabel } from './tlab';
 import { coverageOpacity } from './tlabCrops.svelte';
-import { streamRegion, type SummaryRow } from './regionBudget';
+import { streamRegion, type RegionCell, type SummaryRow } from './regionBudget';
 
 const SNAP_URL = '/fwa-api/tlab/gapi-crops?v=2';
 /** Prefer an identified crop, Unknown, or No prediction over these when colouring a cell. */
@@ -210,6 +210,30 @@ export class TLabGapi {
 		} finally {
 			this.controller = null;
 		}
+	}
+
+	/** Explorer: crop mix from region summary cells streamed by the page (no Raichur snapshot). */
+	applyCells(cells: RegionCell[], loading: { done: number; total: number } | null = null) {
+		this.controller?.abort();
+		this.controller = null;
+		const next = new Map<string, Map<string, GapiCropHa[]>>();
+		for (const c of cells) next.set(c.id, foldRows(c.rows, c.area));
+		this.working = next;
+		this.byCell = next;
+		this.error = null;
+		this.done = loading?.done ?? next.size;
+		this.total = loading?.total ?? next.size;
+		this.status = loading ? 'loading' : 'done';
+	}
+
+	reset() {
+		this.abort();
+		this.working = new Map();
+		this.byCell = new Map();
+		this.status = 'idle';
+		this.error = null;
+		this.done = 0;
+		this.total = 0;
 	}
 
 	private applySnapshot(snap: GapiSnapshot) {

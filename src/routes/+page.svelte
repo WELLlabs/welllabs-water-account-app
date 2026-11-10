@@ -73,6 +73,16 @@
 		}
 	];
 
+	const dataExplorers = [
+		{
+			title: 'Crop water estimation',
+			description:
+				"An estimated crop water requirement for a custom boundary file. The explorer fetches farm plots in the boundary and what is being grown in them using Google's Agricultural Landscape Understanding API and calculates water estimate at a plot and boundary level",
+			href: '/explorers/tlab',
+			thumb: 'crop_water_estimate.webp'
+		}
+	];
+
 	function isExternal(href: string): boolean {
 		return /^https?:\/\//i.test(href);
 	}
@@ -86,8 +96,9 @@
 	/** Bump when replacing files in static/landing_page_images/ so browsers refetch */
 	const THUMB_VERSION = '2026-08-21b';
 
-	function thumbSrc(title: string): string {
-		return `/landing_page_images/${encodeURIComponent(title)}.png?v=${THUMB_VERSION}`;
+	/** `file` overrides the default `<title>.png` */
+	function thumbSrc(title: string, file?: string): string {
+		return `/landing_page_images/${encodeURIComponent(file ?? `${title}.png`)}?v=${THUMB_VERSION}`;
 	}
 
 	function onThumbError(e: Event) {
@@ -249,7 +260,34 @@
 		</div>
 	</section>
 
-	<section class="section section-layers">
+	<section class="section section-explorers">
+		<div class="section-inner">
+			<div class="section-head">
+				<h2>Data Explorers</h2>
+				<p>A collection of explorers for data aggregated from various sources for sensemaking</p>
+			</div>
+			<div class="explorer-list">
+				{#each dataExplorers as item (item.href)}
+					<a class="platform-card platform-card-live explorer-card" href={item.href}>
+						<div class="thumb thumb-explorer" aria-hidden="true">
+							<img src={thumbSrc(item.title, item.thumb)} alt="" loading="lazy" onerror={onThumbError} />
+							<span class="thumb-fallback" hidden></span>
+						</div>
+						<div class="platform-body">
+							<div class="platform-top">
+								<h3>{item.title}</h3>
+								<span class="badge badge-live">Available</span>
+							</div>
+							<p>{item.description}</p>
+							<span class="open-cta">Open explorer →</span>
+						</div>
+					</a>
+				{/each}
+			</div>
+		</div>
+	</section>
+
+	<section class="section section-alt section-layers">
 		<div class="section-inner">
 			<div class="section-head">
 				<h2>Data Layers</h2>
@@ -664,6 +702,61 @@
 		color: #00296b;
 		background: color-mix(in srgb, #1b75e0 18%, white);
 		border-color: color-mix(in srgb, #1b75e0 35%, white);
+	}
+
+	/* Data Explorers: one full-width card per explorer, image beside the text */
+	.explorer-list {
+		display: grid;
+		gap: 1rem;
+	}
+
+	.explorer-card {
+		flex-direction: row;
+	}
+
+	.thumb-explorer {
+		flex: 0 0 38%;
+		/* Matches crop_water_estimate.webp so the whole boundary stays in frame */
+		aspect-ratio: 1470 / 900;
+	}
+
+	.explorer-card .platform-body {
+		justify-content: center;
+		gap: 0.7rem;
+		padding: 1.25rem 1.75rem;
+	}
+
+	.explorer-card h3 {
+		font-size: 1.45rem;
+		line-height: 1.2;
+	}
+
+	.explorer-card p {
+		font-size: 0.95rem;
+		line-height: 1.6;
+	}
+
+	.explorer-card .open-cta {
+		margin-top: 0.4rem;
+	}
+
+	@media (max-width: 900px) {
+		.explorer-card {
+			flex-direction: column;
+		}
+
+		.thumb-explorer {
+			flex-basis: auto;
+			width: 100%;
+		}
+
+		.explorer-card .platform-body {
+			padding: 0.9rem 1rem 1.1rem;
+		}
+
+		.explorer-card h3 {
+			font-size: 1.15rem;
+		}
 	}
 
 	.landing-foot {

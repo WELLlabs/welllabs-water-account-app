@@ -4,7 +4,7 @@ Nothing is cached or written to disk: every request hits Google and the
 response is streamed back with Cache-Control: no-store.
 
 Every upstream call goes through one process-wide token bucket so the project
-stays under Google's 5000 requests/minute quota no matter how many users or
+stays under Google's 6000 requests/minute quota no matter how many users or
 region scans run at once. The service runs uvicorn with --workers 1; more
 workers would each get their own bucket and need AGRI_RATE_PER_MIN divided
 between them.
@@ -42,8 +42,9 @@ AGRI_BASE = "https://agriculturalunderstanding.googleapis.com/v1"
 S2_LEVEL = 13
 TIMEOUT = httpx.Timeout(60.0, connect=10.0)
 
-RATE_PER_MIN = int(os.environ.get("AGRI_RATE_PER_MIN", "4500"))
-MAX_CONCURRENCY = int(os.environ.get("AGRI_MAX_CONCURRENCY", "48"))
+# 90 % of the 6000/min quota. At ~1.5 s per call, 5400/min needs ~135 calls in flight.
+RATE_PER_MIN = int(os.environ.get("AGRI_RATE_PER_MIN", "5400"))
+MAX_CONCURRENCY = int(os.environ.get("AGRI_MAX_CONCURRENCY", "160"))
 MAX_ATTEMPTS = 5
 RETRY_STATUS = {429, 500, 502, 503, 504}
 
@@ -54,7 +55,7 @@ MAX_SUMMARY_CELLS = int(os.environ.get("AGRI_MAX_SUMMARY_CELLS", "12000"))
 MAX_DETAIL_CELLS = 4
 IST = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
 # Below MAX_CONCURRENCY so cell clicks still get upstream slots while a region streams
-REGION_WORKERS = int(os.environ.get("AGRI_REGION_WORKERS", "40"))
+REGION_WORKERS = int(os.environ.get("AGRI_REGION_WORKERS", "140"))
 # Mean S2 level-13 cell area; used only to reject absurd boundaries before covering them
 S2_L13_KM2 = 1.27
 
@@ -63,7 +64,7 @@ router = APIRouter(prefix="/fwa-api/agri")
 
 class _RateLimiter:
     """Token bucket. Burst is one second of refill, so any 60 s window sees at most
-    rate + rate/60 requests (4575 at the default), leaving headroom under 5000."""
+    rate + rate/60 requests (5490 at the default), leaving headroom under 6000."""
 
     def __init__(self, per_minute: int):
         self.rate = per_minute / 60.0
@@ -503,6 +504,11 @@ def _detail_text(detail: Any) -> str:
     return str(detail)
 
 
+def _process_cell(res: dict, handler, prepared, cell: str) -> dict:
+    features, _ = _parse_geojson(res, "monitoredLandscape")
+    return handler(features, prepared, cell)
+
+
 def _stream_cells(cells: list[str], region: BaseGeometry, handler) -> StreamingResponse:
     """NDJSON: {"type":"start"}, one {"type":"cell"} per cell (handler output or "error"), {"type":"done"}."""
     key = _api_key()
@@ -517,8 +523,8 @@ def _stream_cells(cells: list[str], region: BaseGeometry, handler) -> StreamingR
                 msg: dict[str, Any] = {"type": "cell", "cellId": cell}
                 try:
                     res = await _call(client, "monitorLandscape", {"locationSpecifier": {"s2CellId": cell}}, key)
-                    features, _ = _parse_geojson(res, "monitoredLandscape")
-                    msg.update(handler(features, prepared, cell))
+                    # ~100 KB of GeoJSON and a shapely test per field: keep it off the event loop
+                    msg.update(await asyncio.to_thread(_process_cell, res, handler, prepared, cell))
                 except HTTPException as exc:
                     msg["error"] = _detail_text(exc.detail)
                 except Exception as exc:
@@ -568,6 +574,29 @@ async def region_plan(req: RegionRequest):
             "areaKm2": round(_area_km2(region), 2),
             "ratePerMinute": RATE_PER_MIN,
             "estimatedSeconds": round(max(rate_secs, len(cells) * 1.5 / REGION_WORKERS), 1),
+        },
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@router.post("/region/cells")
+async def region_cells(req: RegionRequest):
+    """The boundary's S2 level-13 covering with each cell's corners, without calling Google.
+
+    The explorer draws this grid as soon as a boundary is uploaded, before any data is queried.
+    """
+    region = _region_shape(req.geometry)
+    cells = _cover(region)
+    if not cells:
+        raise HTTPException(status_code=400, detail="The boundary does not cover any S2 cells.")
+    return JSONResponse(
+        {
+            "boundary": mapping(region.simplify(0.0001, preserve_topology=True)),
+            "bounds": [round(v, 6) for v in region.bounds],
+            "areaKm2": round(_area_km2(region), 2),
+            "ratePerMinute": RATE_PER_MIN,
+            "estimatedSeconds": round(max(len(cells) / (RATE_PER_MIN / 60), len(cells) * 1.5 / REGION_WORKERS), 1),
+            "cells": [{"id": c, "ring": _cell_ring(c)} for c in cells],
         },
         headers={"Cache-Control": "no-store"},
     )

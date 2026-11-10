@@ -64,7 +64,7 @@ export interface WaterSeason {
 }
 
 /** scripts/build_tlab_water.py output: water need only, `m3` per cell in `seasons` order */
-interface WaterSnapshot {
+export interface WaterSnapshot {
 	generatedAt: string;
 	failed?: string[];
 	seasons: WaterSeason[];
@@ -79,6 +79,8 @@ export class TLabWater {
 	budgetCsv = $state<string | null>(null);
 
 	seasonKey = $state('');
+	/** Prefix for exported file names */
+	exportName = 'raichur';
 	private controller: AbortController | null = null;
 
 	generatedAt = $derived(this.snapshot?.generatedAt ?? null);
@@ -168,7 +170,7 @@ export class TLabWater {
 
 	downloadCellsCsv() {
 		const lines = ['cell_id,season,water_m3', ...[...this.byCell].map(([id, m3]) => `${id},${this.seasonKey},${m3}`)];
-		const name = `raichur_water_${this.seasonKey.replace(/[^\w]+/g, '_').toLowerCase()}_cells.csv`;
+		const name = `${this.exportName}_water_${this.seasonKey.replace(/[^\w]+/g, '_').toLowerCase()}_cells.csv`;
 		downloadBlob(new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' }), name);
 	}
 
@@ -196,6 +198,27 @@ export class TLabWater {
 			if (!signal.aborted) this.error = e instanceof Error ? e.message : 'Loading the water budget failed.';
 		} finally {
 			this.controller = null;
+		}
+	}
+
+	/** The crop water budgets CSV, fetched once */
+	async loadBudget(): Promise<string> {
+		if (this.budgetCsv) return this.budgetCsv;
+		const res = await fetch('/total_water_needed.csv');
+		if (!res.ok) throw new Error('Could not load the crop water budgets (total_water_needed.csv).');
+		this.budgetCsv = await res.text();
+		return this.budgetCsv;
+	}
+
+	/** Explorer: water need per cell computed in the browser from region summary cells */
+	applyRegion(snap: WaterSnapshot | null, status: 'loading' | 'done' = 'done') {
+		this.controller?.abort();
+		this.controller = null;
+		this.snapshot = snap;
+		this.error = null;
+		this.status = snap ? status : 'idle';
+		if (snap && (!this.seasonKey || !snap.seasons.some((s) => s.key === this.seasonKey))) {
+			this.seasonKey = snap.defaultSeason;
 		}
 	}
 

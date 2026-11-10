@@ -8,5 +8,5 @@
 	<title>Farm Water Accounting</title>
 </svelte:head>
 
-<AppNav />
+<AppNav section="fwa" />
 {@render children()}

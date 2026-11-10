@@ -11,10 +11,13 @@
 		swatch?: string;
 		/** One-of-a-group layer: a radio instead of a switch (clicking the active one turns it off) */
 		exclusive?: boolean;
+		/** Data still downloading for this layer: a thin bar under the subtitle, shown even when collapsed */
+		progress?: { label: string; fraction: number } | null;
 		children: Snippet;
 	}
 
-	let { title, subtitle, on, onToggle, open = $bindable(true), swatch, exclusive = false, children }: Props = $props();
+	let { title, subtitle, on, onToggle, open = $bindable(true), swatch, exclusive = false, progress = null, children }: Props =
+		$props();
 	const id = `tlab-sec-${Math.random().toString(36).slice(2, 9)}`;
 </script>
 
@@ -34,6 +37,12 @@
 			<span class="sec-titles">
 				<span class="sec-title">{title}</span>
 				{#if subtitle}<span class="sec-sub">{subtitle}</span>{/if}
+				{#if progress}
+					<span class="sec-progress" role="status">
+						<span class="sec-progress-bar"><span style:width="{Math.max(4, progress.fraction * 100)}%"></span></span>
+						<span class="sec-progress-label">{progress.label}</span>
+					</span>
+				{/if}
 			</span>
 		</button>
 		{#if on !== undefined && exclusive}
@@ -143,6 +152,36 @@
 		font-size: 0.68rem;
 		color: color-mix(in srgb, #00296b 55%, white);
 		line-height: 1.3;
+	}
+
+	.sec-progress {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		margin-top: 0.2rem;
+	}
+
+	.sec-progress-bar {
+		flex: 0 0 3.5rem;
+		height: 0.2rem;
+		border-radius: 999px;
+		background: color-mix(in srgb, #00296b 10%, white);
+		overflow: hidden;
+	}
+
+	.sec-progress-bar > span {
+		display: block;
+		height: 100%;
+		border-radius: inherit;
+		background: #00509d;
+		transition: width 0.4s ease;
+	}
+
+	.sec-progress-label {
+		font-size: 0.66rem;
+		color: color-mix(in srgb, #00296b 60%, white);
+		font-variant-numeric: tabular-nums;
+		white-space: nowrap;
 	}
 
 	.sec-off .sec-title {

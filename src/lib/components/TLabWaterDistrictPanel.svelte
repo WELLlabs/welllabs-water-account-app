@@ -4,11 +4,13 @@
 	import { WATER_EMPTY, WATER_PALETTE, compactM3, seasonParts, type TLabWater } from '$lib/tlabWater.svelte';
 
 	interface Props {
+		/** Heading for the area the insights cover */
+		regionName?: string;
 		water: TLabWater;
 		onSeason: (key: string) => void;
 	}
 
-	let { water, onSeason }: Props = $props();
+	let { water, onSeason, regionName = 'Raichur district' }: Props = $props();
 
 	const season = $derived(water.seasonKey ? seasonParts(water.seasonKey) : null);
 	const totals = $derived(water.totals);
@@ -48,7 +50,7 @@
 			<div>
 				<h2>Water budget</h2>
 				<p class="meta">
-					Raichur district{#if season}
+					{regionName}{#if season}
 						· {season.season} {season.year}
 						<small>{season.range}</small>
 					{/if}

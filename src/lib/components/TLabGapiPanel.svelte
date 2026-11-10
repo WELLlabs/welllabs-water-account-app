@@ -6,6 +6,8 @@
 	import { seasonParts } from '$lib/tlabWater.svelte';
 
 	interface Props {
+		/** Heading for the area the insights cover */
+		regionName?: string;
 		gapi: TLabGapi;
 		seasons: string[];
 		onSeason: (key: string) => void;
@@ -15,7 +17,7 @@
 		wide?: boolean;
 	}
 
-	let { gapi, seasons, onSeason, children, wide = false }: Props = $props();
+	let { gapi, seasons, onSeason, children, wide = false, regionName = 'Raichur district' }: Props = $props();
 
 	const TOP = 6;
 	const insight = $derived(gapi.insight);
@@ -60,7 +62,7 @@
 			<div>
 				<h2>Google ALU</h2>
 				<p class="meta">
-					Raichur district{#if season}
+					{regionName}{#if season}
 						· {season.season} {season.year}
 						<small>{season.range}</small>
 					{/if}

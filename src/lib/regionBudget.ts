@@ -1,4 +1,5 @@
 import { readGpkgFeatureCollection } from './gpkgParser';
+import { configureGeoPackage } from './setupGeopackage';
 import { loadShapefileFromFiles, looksLikeShapefileInput } from './shapefileImport';
 import { formatCrop, seasonLabel } from './tlab';
 import { downloadBlob, waterExportBaseName } from './exportUtils';
@@ -108,7 +109,8 @@ export async function readBoundaryFiles(files: File[]): Promise<Boundary> {
 		}
 	} else if (gpkg) {
 		name = gpkg.name;
-		fc = (await readGpkgFeatureCollection(await gpkg.arrayBuffer())).featureCollection;
+		configureGeoPackage();
+		fc =(await readGpkgFeatureCollection(await gpkg.arrayBuffer())).featureCollection;
 	} else if (looksLikeShapefileInput(files)) {
 		const shp = await loadShapefileFromFiles(files);
 		name = shp.displayName;

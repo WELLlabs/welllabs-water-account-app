@@ -18,6 +18,8 @@
 		surveyLegend: HudKeyItem[];
 		surveyNote: string;
 		surveyReady: boolean;
+		/** Offer the crop survey as a crop source (Raichur only) */
+		allowSurvey?: boolean;
 	}
 
 	let {
@@ -32,7 +34,8 @@
 		onSurveySeason,
 		surveyLegend,
 		surveyNote,
-		surveyReady
+		surveyReady,
+		allowSurvey = true
 	}: Props = $props();
 
 	const survey = $derived(source === 'survey');
@@ -64,6 +67,16 @@
 	}
 </script>
 
+{#snippet sourcePicker()}
+	<label class="grow">
+		<span>Crops on the map</span>
+		<select value={source} onchange={(e) => onSource(e.currentTarget.value as WaterCropSource)}>
+			<option value="gapi">Google ALU</option>
+			<option value="survey">Crop survey</option>
+		</select>
+	</label>
+{/snippet}
+
 <TLabMapHud
 	title="Water budget"
 	{years}
@@ -72,16 +85,8 @@
 	{seasons}
 	{seasonKey}
 	onSeason={setSeason}
+	extra={allowSurvey ? sourcePicker : undefined}
 >
-	{#snippet extra()}
-		<label class="grow">
-			<span>Crops on the map</span>
-			<select value={source} onchange={(e) => onSource(e.currentTarget.value as WaterCropSource)}>
-				<option value="gapi">Google ALU</option>
-				<option value="survey">Crop survey</option>
-			</select>
-		</label>
-	{/snippet}
 
 	{#snippet facts()}
 		{#if !survey && totals}
