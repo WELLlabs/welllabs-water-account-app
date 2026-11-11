@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime
+import functools
 import json
 import math
 import os
@@ -23,6 +24,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 import httpx
+import orjson
 import s2sphere
 from dotenv import load_dotenv
 from fastapi import APIRouter, HTTPException, Query
@@ -42,9 +44,9 @@ AGRI_BASE = "https://agriculturalunderstanding.googleapis.com/v1"
 S2_LEVEL = 13
 TIMEOUT = httpx.Timeout(60.0, connect=10.0)
 
-# 90 % of the 6000/min quota. At ~1.5 s per call, 5400/min needs ~135 calls in flight.
+# 90 % of the 6000/min quota (a ceiling; concurrency is what bounds throughput in practice)
 RATE_PER_MIN = int(os.environ.get("AGRI_RATE_PER_MIN", "5400"))
-MAX_CONCURRENCY = int(os.environ.get("AGRI_MAX_CONCURRENCY", "160"))
+MAX_CONCURRENCY = int(os.environ.get("AGRI_MAX_CONCURRENCY", "80"))
 MAX_ATTEMPTS = 5
 RETRY_STATUS = {429, 500, 502, 503, 504}
 
@@ -55,7 +57,16 @@ MAX_SUMMARY_CELLS = int(os.environ.get("AGRI_MAX_SUMMARY_CELLS", "12000"))
 MAX_DETAIL_CELLS = 4
 IST = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
 # Below MAX_CONCURRENCY so cell clicks still get upstream slots while a region streams
-REGION_WORKERS = int(os.environ.get("AGRI_REGION_WORKERS", "140"))
+# monitorLandscape throughput peaks at ~45 cells/s with 60–90 calls in flight and collapses
+# above ~100 (latency climbs from ~1 s to 5 s+): measured 2026-11-11. ~1.5 s per call at 64
+# workers.
+REGION_WORKERS = int(os.environ.get("AGRI_REGION_WORKERS", "64"))
+# End-to-end region scan speed (including connection warm-up), for the time shown before a query
+REGION_CELLS_PER_SEC = float(os.environ.get("AGRI_REGION_CELLS_PER_SEC", "30"))
+
+
+def _estimate_seconds(cells: int) -> float:
+    return round(5 + max(cells / (RATE_PER_MIN / 60), cells / REGION_CELLS_PER_SEC), 1)
 # Mean S2 level-13 cell area; used only to reject absurd boundaries before covering them
 S2_L13_KM2 = 1.27
 
@@ -168,7 +179,7 @@ async def _call(client: httpx.AsyncClient, method: str, body: dict, key: str) ->
             continue
 
         if resp.status_code == 200:
-            return resp.json()
+            return orjson.loads(resp.content)
         if resp.status_code in RETRY_STATUS and attempt < last:
             delay = _retry_delay(resp, attempt)
             print(f"[agri] {method} {resp.status_code}, retry {attempt + 1} in {delay:.1f}s", flush=True)
@@ -188,7 +199,7 @@ def _parse_geojson(payload: dict, wrapper: str) -> tuple[list[dict], dict | None
     raw = inner.get("geojson")
     if not raw:
         return [], inner.get("dataVersion")
-    fc = json.loads(raw)
+    fc = orjson.loads(raw)
     return fc.get("features") or [], inner.get("dataVersion")
 
 
@@ -408,17 +419,23 @@ def _compact_predictions(preds: list[dict] | None) -> list[list]:
     return out
 
 
-def _inside_fields(features: list[dict], prepared):
+def _inside_fields(features: list[dict], prepared, cell: str):
     """Farm fields whose centroid lies inside the boundary.
 
     monitorLandscape returns each field from exactly one cell (the one holding its centroid),
     so fields never repeat across cells and a cell's drill-down matches its share of the totals.
+    For the same reason every field of a cell lying wholly inside the boundary counts, and the
+    per-field centroid test (most of the CPU per cell) is only needed on the boundary's edge.
     """
+    whole = prepared.contains(Polygon(_cell_ring(cell)))
     for f in features:
         props = f.get("properties") or {}
         fid = f.get("id")
         geom = f.get("geometry")
         if props.get("alu_type") != "field" or not fid or not geom:
+            continue
+        if whole:
+            yield fid, geom, props
             continue
         try:
             inside = prepared.contains(shape(geom).centroid)
@@ -441,9 +458,15 @@ def _region_fields(features: list[dict], prepared, cell: str) -> dict:
                     "pred": _compact_predictions(props.get("monitoring_prediction")),
                 },
             }
-            for fid, geom, props in _inside_fields(features, prepared)
+            for fid, geom, props in _inside_fields(features, prepared, cell)
         ]
     }
+
+
+@functools.lru_cache(maxsize=8192)
+def _season_month(sec: float) -> tuple[str, str]:
+    """(season label, sowing month YYYY-MM); prediction timestamps repeat across a cell's fields."""
+    return _season_key(sec), datetime.datetime.fromtimestamp(sec, IST).strftime("%Y-%m")
 
 
 def _season_key(sec: float) -> str:
@@ -472,7 +495,7 @@ def _cell_summary(features: list[dict], prepared, cell: str) -> dict:
     plots = 0
     area = 0.0
     agg: dict[tuple, list] = {}
-    for _, _, props in _inside_fields(features, prepared):
+    for _, _, props in _inside_fields(features, prepared, cell):
         a = props.get("area_sq_m") or 0
         plots += 1
         area += a
@@ -481,11 +504,11 @@ def _cell_summary(features: list[dict], prepared, cell: str) -> dict:
             start = p.get("start_timestamp_sec")
             if not start:
                 continue
-            key = _season_key(start)
+            key = _season_month(start)[0]
             if key not in best or (p.get("conf_1") or 0) > (best[key].get("conf_1") or 0):
                 best[key] = p
         for key, p in best.items():
-            month = datetime.datetime.fromtimestamp(p["start_timestamp_sec"], IST).strftime("%Y-%m")
+            month = _season_month(p["start_timestamp_sec"])[1]
             k = (key, month, p.get("crop_1") or "NO_PREDICTION", _conf_band(p.get("conf_1") or 0))
             e = agg.setdefault(k, [0, 0.0])
             e[0] += 1
@@ -534,16 +557,16 @@ def _stream_cells(cells: list[str], region: BaseGeometry, handler) -> StreamingR
         workers = [asyncio.create_task(worker()) for _ in range(min(REGION_WORKERS, len(cells)))]
         failed = 0
         try:
-            yield json.dumps(
+            yield orjson.dumps(
                 {"type": "start", "cells": len(cells), "areaKm2": round(_area_km2(region), 2), "ratePerMinute": RATE_PER_MIN}
-            ) + "\n"
+            ) + b"\n"
             for done in range(1, len(cells) + 1):
                 msg = await queue.get()
                 msg["done"] = done
                 if "error" in msg:
                     failed += 1
-                yield json.dumps(msg, separators=(",", ":"), ensure_ascii=False) + "\n"
-            yield json.dumps({"type": "done", "cells": len(cells), "failed": failed}) + "\n"
+                yield orjson.dumps(msg) + b"\n"
+            yield orjson.dumps({"type": "done", "cells": len(cells), "failed": failed}) + b"\n"
         finally:
             for w in workers:
                 w.cancel()
@@ -563,7 +586,6 @@ async def region_plan(req: RegionRequest):
     """
     region = _region_shape(req.geometry)
     cells = _cover(region)
-    rate_secs = len(cells) / (RATE_PER_MIN / 60)
     return JSONResponse(
         {
             "boundary": mapping(region.simplify(0.0001, preserve_topology=True)),
@@ -573,7 +595,7 @@ async def region_plan(req: RegionRequest):
             "maxPlotCells": MAX_REGION_CELLS,
             "areaKm2": round(_area_km2(region), 2),
             "ratePerMinute": RATE_PER_MIN,
-            "estimatedSeconds": round(max(rate_secs, len(cells) * 1.5 / REGION_WORKERS), 1),
+            "estimatedSeconds": _estimate_seconds(len(cells)),
         },
         headers={"Cache-Control": "no-store"},
     )
@@ -595,7 +617,7 @@ async def region_cells(req: RegionRequest):
             "bounds": [round(v, 6) for v in region.bounds],
             "areaKm2": round(_area_km2(region), 2),
             "ratePerMinute": RATE_PER_MIN,
-            "estimatedSeconds": round(max(len(cells) / (RATE_PER_MIN / 60), len(cells) * 1.5 / REGION_WORKERS), 1),
+            "estimatedSeconds": _estimate_seconds(len(cells)),
             "cells": [{"id": c, "ring": _cell_ring(c)} for c in cells],
         },
         headers={"Cache-Control": "no-store"},

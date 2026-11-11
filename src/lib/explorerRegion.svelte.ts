@@ -128,7 +128,7 @@ const CORE_TASKS = new Set(['google', 'budget']);
 
 /** Seconds until the workspace opens (Google crops + budgets), for the preview screen */
 export function estimateLoadSeconds(region: ExplorerRegion): number {
-	return Math.round(region.estimatedSeconds + 5);
+	return Math.round(region.estimatedSeconds);
 }
 
 export function formatDuration(sec: number): string {
