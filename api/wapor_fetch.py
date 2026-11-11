@@ -22,9 +22,19 @@ from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from pathlib import Path
 
-# Workers for background warming; URGENT_PROCESSES more are reserved for on-demand reads
-PROCESSES = int(os.environ.get("WAPOR_PROCESSES", "16"))
-URGENT_PROCESSES = int(os.environ.get("WAPOR_URGENT_PROCESSES", "4"))
+def _ram_gb() -> float:
+    try:
+        return os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / 2**30
+    except (ValueError, OSError, AttributeError):
+        return 2.0
+
+
+# Each worker holds ~80 MB (numpy + rasterio + GDAL). Size the pool to the machine: 20 workers
+# took a 2 GB t3.small (beta) out of memory, so default to ~1.5 workers per GB of RAM, 3–20.
+_TOTAL = max(3, min(20, int(_ram_gb() * 1.5)))
+# Workers reserved for on-demand reads (the map, a clicked point); the rest warm in the background
+URGENT_PROCESSES = int(os.environ.get("WAPOR_URGENT_PROCESSES", "1" if _TOTAL <= 6 else "4"))
+PROCESSES = int(os.environ.get("WAPOR_PROCESSES", str(max(1, _TOTAL - URGENT_PROCESSES))))
 
 GDAL_ENV = {
     "GDAL_DISABLE_READDIR_ON_OPEN": "EMPTY_DIR",
