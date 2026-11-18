@@ -2,6 +2,7 @@
 	import { onDestroy } from 'svelte';
 	import TLabWorkspace from '$lib/components/TLabWorkspace.svelte';
 	import ExplorerPreviewMap from '$lib/components/ExplorerPreviewMap.svelte';
+	import BoundaryPicker, { type BoundaryItem } from '$lib/components/BoundaryPicker.svelte';
 	import { collectDroppedFiles } from '$lib/shapefileImport';
 	import { readBoundaryFiles } from '$lib/regionBudget';
 	import { waporExtentParam } from '$lib/tlab';
@@ -14,8 +15,19 @@
 	} from '$lib/explorerRegion.svelte';
 
 	type Stage = 'upload' | 'preview' | 'loading' | 'ready';
+	type Source = 'districts' | 'commands' | 'upload';
+
+	/** Matches MAX_SUMMARY_CELLS × 1.27 km² on the server */
+	const MAX_KM2 = 15_000;
+
+	const SOURCES: { key: Source; title: string; text: string }[] = [
+		{ key: 'districts', title: 'District', text: 'Search any of the 732 districts of India' },
+		{ key: 'commands', title: 'Canal command area', text: 'Search CWC major and medium irrigation command areas' },
+		{ key: 'upload', title: 'Upload a boundary', text: 'Shapefile, GeoJSON or GeoPackage of your own area' }
+	];
 
 	let stage = $state<Stage>('upload');
+	let source = $state<Source>('districts');
 	let region = $state.raw<ExplorerRegion | null>(null);
 	let busy = $state(false);
 	let error = $state<string | null>(null);
@@ -52,6 +64,18 @@
 		} finally {
 			busy = false;
 			if (input) input.value = '';
+		}
+	}
+
+	/** A district or canal command picked from the list; errors show in the picker */
+	async function usePicked(item: BoundaryItem, boundary: GeoJSON.FeatureCollection) {
+		busy = true;
+		try {
+			const name = source === 'districts' && item.state ? `${item.name}, ${item.state}` : item.name;
+			region = await fetchRegion(name, boundary);
+			stage = 'preview';
+		} finally {
+			busy = false;
 		}
 	}
 
@@ -112,7 +136,48 @@
 		{#if stage === 'upload'}
 			<section class="ex-card ex-upload">
 				<h1>Crop water estimation</h1>
-				<p class="ex-lead">Upload a boundary to start.</p>
+				<p class="ex-lead">Choose the area to explore.</p>
+				<div class="ex-sources" role="tablist" aria-label="Area source">
+					{#each SOURCES as s, i (s.key)}
+						<button
+							type="button"
+							role="tab"
+							class="ex-source"
+							class:selected={source === s.key}
+							aria-selected={source === s.key}
+							disabled={busy}
+							onclick={() => {
+								source = s.key;
+								error = null;
+							}}
+						>
+							<span class="ex-source-num">{i + 1}</span>
+							<strong>{s.title}</strong>
+							<span>{s.text}</span>
+						</button>
+					{/each}
+				</div>
+				{#if source === 'districts'}
+					{#key source}
+						<BoundaryPicker
+							dataset="districts"
+							placeholder="Search by district or state, e.g. Raichur"
+							maxKm2={MAX_KM2}
+							{busy}
+							onpick={usePicked}
+						/>
+					{/key}
+				{:else if source === 'commands'}
+					{#key source}
+						<BoundaryPicker
+							dataset="commands"
+							placeholder="Search by project, district or state, e.g. Tungabhadra"
+							maxKm2={MAX_KM2}
+							{busy}
+							onpick={usePicked}
+						/>
+					{/key}
+				{:else}
 				<div
 					class="ex-drop"
 					class:dragging
@@ -145,6 +210,10 @@
 				/>
 				{#if error}
 					<p class="ex-error">{error}</p>
+				{/if}
+				{/if}
+				{#if busy && source !== 'upload'}
+					<p class="ex-note">Building the grid for this area…</p>
 				{/if}
 				<p class="ex-note">Up to about 15,000 km², and within 3° on a side for the WaPOR layers.</p>
 			</section>
@@ -253,7 +322,7 @@
 	}
 
 	.ex-upload {
-		width: min(36rem, 100%);
+		width: min(44rem, 100%);
 		padding: 2rem;
 		text-align: center;
 	}
@@ -278,6 +347,72 @@
 		font-size: 0.9rem;
 		line-height: 1.55;
 		color: color-mix(in srgb, #00296b 70%, white);
+	}
+
+	.ex-sources {
+		display: grid;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+		gap: 0.6rem;
+		margin-bottom: 1rem;
+	}
+
+	.ex-source {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-start;
+		gap: 0.2rem;
+		padding: 0.75rem;
+		border: 1px solid color-mix(in srgb, #00296b 14%, white);
+		border-radius: 0.6rem;
+		background: white;
+		font: inherit;
+		color: #00296b;
+		text-align: left;
+		cursor: pointer;
+		transition: border-color 0.15s, background 0.15s;
+	}
+
+	.ex-source strong {
+		font-size: 0.85rem;
+	}
+
+	.ex-source span {
+		font-size: 0.7rem;
+		line-height: 1.4;
+		color: color-mix(in srgb, #00296b 65%, white);
+	}
+
+	.ex-source .ex-source-num {
+		display: grid;
+		place-items: center;
+		width: 1.3rem;
+		height: 1.3rem;
+		border-radius: 50%;
+		background: color-mix(in srgb, #00296b 8%, white);
+		font-size: 0.7rem;
+		font-weight: 700;
+		color: #00296b;
+	}
+
+	.ex-source:hover:not(:disabled) {
+		border-color: #1b75e0;
+	}
+
+	.ex-source.selected {
+		border-color: #1b75e0;
+		background: color-mix(in srgb, #1b75e0 7%, white);
+		box-shadow: inset 0 0 0 1px #1b75e0;
+	}
+
+	.ex-source.selected .ex-source-num {
+		background: #1b75e0;
+		color: white;
+	}
+
+	@media (max-width: 560px) {
+		.ex-sources {
+			grid-template-columns: 1fr;
+		}
 	}
 
 	.ex-drop {

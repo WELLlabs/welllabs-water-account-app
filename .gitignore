@@ -41,3 +41,7 @@ data-scraping/*.geojson
 data-scraping/*.tif
 data-scraping/*.tiff
 data-scraping
+
+# Explorer boundary sets (served from S3 in production)
+data/boundaries/
+*.fgb
