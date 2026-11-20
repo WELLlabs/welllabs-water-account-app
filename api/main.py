@@ -7,6 +7,7 @@ import json
 import shutil
 import traceback
 import uuid
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
@@ -26,7 +27,14 @@ from .qgz_builder import build_qgz
 UPLOAD_ROOT = Path("/tmp/welllabs-qgz-uploads")
 UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
 
-app = FastAPI(title="Farm Water Accounting QGZ API", version="1.1.0")
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    # Startup hooks; newer FastAPI has no add_event_handler / on_event
+    start_collector()
+    yield
+
+
+app = FastAPI(title="Farm Water Accounting QGZ API", version="1.1.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -39,7 +47,6 @@ app.add_middleware(
 app.include_router(agri_router)
 app.include_router(boundaries_router)
 app.include_router(market_router)
-app.add_event_handler("startup", start_collector)
 app.include_router(gapi_crops_router)
 app.include_router(hydro_router)
 app.include_router(raw_crops_router)
