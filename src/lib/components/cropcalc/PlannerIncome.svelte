@@ -37,7 +37,17 @@
 		sunflower: [{ key: 'Sunflower', label: 'Sunflower' }],
 		seasame: [{ key: 'Sesame', label: 'Sesame' }],
 		sesame: [{ key: 'Sesame', label: 'Sesame' }],
-		chilli: [{ key: 'Chilli', label: 'Dry chilli' }]
+		chilli: [{ key: 'Chilli', label: 'Dry chilli' }],
+		'bajra-(pearl-millet)': [{ key: 'Bajra', label: 'Bajra' }],
+		'onion-(dry-bulb)': [{ key: 'Onion', label: 'Onion' }],
+		'brinjal-(eggplant)': [{ key: 'Brinjal', label: 'Brinjal' }],
+		'ridge-gourd': [{ key: 'Ridge gourd', label: 'Ridge gourd' }],
+		'bitter-gourd': [{ key: 'Bitter gourd', label: 'Bitter gourd' }],
+		tomato: [{ key: 'Tomato', label: 'Tomato' }],
+		cucumber: [{ key: 'Cucumber', label: 'Cucumber' }],
+		'okra-(bhendi)': [{ key: 'Okra', label: 'Okra (bhindi)' }],
+		'coriander-(leaf/seed)': [{ key: 'Coriander', label: 'Coriander leaves' }],
+		'fenugreek-(leaf/seed)': [{ key: 'Fenugreek', label: 'Methi leaves' }]
 	};
 
 	const data = $derived(market.data);

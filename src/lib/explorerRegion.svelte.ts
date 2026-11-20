@@ -103,7 +103,11 @@ export function waterSnapshotFromCells(cells: RegionCell[], budgetCsv: string): 
 			key: opt.key,
 			plots: opt.plots,
 			m3: Math.round(totals.m3),
-			peak: peak && { calendarMonth: peak.calendarMonth, calendarYear: peak.calendarYear, m3: Math.round(peak.m3) }
+			peak: peak && { calendarMonth: peak.calendarMonth, calendarYear: peak.calendarYear, m3: Math.round(peak.m3) },
+			crops: summary.rows
+				.filter((r) => r.totalM3 > 0)
+				.map((r) => ({ crop: r.crop, m3: Math.round(r.totalM3) }))
+				.sort((a, b) => b.m3 - a.m3)
 		});
 		for (const c of summary.cells) m3.get(c.id)!.push(Math.round(c.m3));
 	}

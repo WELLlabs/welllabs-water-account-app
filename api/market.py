@@ -81,6 +81,16 @@ COMMODITIES: dict[str, list[str]] = {
     "Ragi": ["Ragi(Finger Millet)"],
     "Sunflower": ["Sunflower/Sunflower Seed", "Sunflower"],
     "Sesame": ["Sesamum(Sesame,Gingelly,Til)"],
+    # Vegetables and herbs in the crop water calculator (no DES yield: the user enters one)
+    "Onion": ["Onion"],
+    "Tomato": ["Tomato"],
+    "Brinjal": ["Brinjal"],
+    "Okra": ["Bhindi(Ladies Finger)", "Ladies Finger"],
+    "Cucumber": ["Cucumbar(Kheera)"],
+    "Bitter gourd": ["Bitter gourd"],
+    "Ridge gourd": ["Ridgeguard(Tori)"],
+    "Coriander": ["Coriander(Leaves)"],
+    "Fenugreek": ["Methi(Leaves)"],
 }
 
 # Agmarknet and DES spell some states differently from the district boundaries

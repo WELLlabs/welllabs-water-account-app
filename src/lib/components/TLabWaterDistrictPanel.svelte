@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { fmt } from '$lib/components/cropcalc/format';
 	import { formatCalendarMonth } from '$lib/waterBudget';
+	import TLabLineChart from './TLabLineChart.svelte';
+	import { completeYears, seasonInYear, selectedYear, seriesInsight, thirstySeries } from '$lib/tlabSeries';
 	import TLabSeasonChart, { seasonSlot, sortSeasonColumns, type SeasonColumn } from './TLabSeasonChart.svelte';
 	import { WATER_EMPTY, WATER_PALETTE, compactM3, seasonParts, type TLabWater } from '$lib/tlabWater.svelte';
 
@@ -41,6 +43,9 @@
 	});
 
 	const bars = $derived(water.seasons.filter((s) => s.m3 > 0 || s.plots > 0));
+	const waterYears = $derived(completeYears(bars.map((b) => b.key)));
+	const waterKeys = $derived([...waterYears.keys()]);
+	const thirsty = $derived(thirstySeries(water.seasons, waterYears));
 	const columns = $derived<SeasonColumn[]>(
 		sortSeasonColumns(bars).map((b) => {
 			const slot = seasonSlot(b.key);
@@ -141,6 +146,24 @@
 					label="Crop water need by season"
 				/>
 			</section>
+			{#if thirsty.length}
+				<section>
+					<h3>Most water-consuming crops</h3>
+					<TLabLineChart
+						keys={waterKeys}
+						series={thirsty}
+						selected={selectedYear(water.seasonKey)}
+						onSelect={(y) => {
+							const k = seasonInYear(waterYears, y, water.seasonKey);
+							if (k) onSeason(k);
+						}}
+						format={(v) => `${compactM3(v)} m³`}
+						insight={seriesInsight(thirsty, waterKeys, (v) => `${compactM3(v)} m³`, 'most water-consuming crop')}
+						label="Water need of the five most water-consuming crops by agricultural year"
+					/>
+					<p class="muted">Crop water need per agricultural year, all seasons added. Complete years only.</p>
+				</section>
+			{/if}
 		{/if}
 
 		<section>

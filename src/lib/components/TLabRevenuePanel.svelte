@@ -1,6 +1,10 @@
 <script lang="ts">
 	import { cropColor } from '$lib/tlab';
 	import type { GapiCropHa } from '$lib/tlabGapi.svelte';
+	import TLabLineChart from './TLabLineChart.svelte';
+	import { completeYears, revenueSeries, seasonInYear, selectedYear, seriesInsight, valueStats } from '$lib/tlabSeries';
+	import TLabValueTable from './TLabValueTable.svelte';
+	import type { WaterSeason } from '$lib/tlabWater.svelte';
 	import TLabSeasonChart, { seasonSlot, sortSeasonColumns, type SeasonColumn } from './TLabSeasonChart.svelte';
 	import {
 		REVENUE_PALETTE,
@@ -26,9 +30,11 @@
 		/** Region crop mix per season (Google ALU), for the every-season chart */
 		seasonMix?: Map<string, GapiCropHa[]>;
 		onSeason?: (key: string) => void;
+		/** Water need by crop per season, for revenue per m³ */
+		waterSeasons?: WaterSeason[];
 	}
 
-	let { market, regionName, cellId, cellToken, plotsLoading, plotsError, onRetry, onOpenCell, seasonMix, onSeason }: Props =
+	let { market, regionName, cellId, cellToken, plotsLoading, plotsError, onRetry, onOpenCell, seasonMix, onSeason, waterSeasons = [] }: Props =
 		$props();
 
 	const season = $derived(market.seasonKey ? seasonParts(market.seasonKey) : null);
@@ -92,6 +98,13 @@
 			: `${where} DES median, ${y.value} q/ha`;
 	}
 
+	const revYears = $derived(completeYears(seasonColumns.columns.map((c) => c.key)));
+	const lineKeys = $derived([...revYears.keys()]);
+	const topRevenue = $derived(seasonMix ? revenueSeries(seasonMix, market.rates, revYears) : []);
+	const topValue = $derived(seasonMix ? valueStats(seasonMix, market.rates, waterSeasons, revYears) : []);
+	const span = $derived(lineKeys.length ? (lineKeys.length > 1 ? `${lineKeys[0]} to ${lineKeys[lineKeys.length - 1]}` : lineKeys[0]) : '');
+	const rs = (v: number) => `₹${compactRupees(v)}`;
+
 	/** Priced crops, largest first; one is worked through the formulas */
 	const priced = $derived(crops.filter((c) => c.rate && c.yieldQha).sort((a, b) => b.revenue - a.revenue));
 	let pickCrop = $state<string | null>(null);
@@ -154,6 +167,50 @@
 				({ha(idleHa)} ha) earn nothing here.
 			</p>
 		</section>
+
+		{#if topRevenue.length}
+			<section>
+				<h3>Most revenue</h3>
+				<TLabLineChart
+					keys={lineKeys}
+					series={topRevenue}
+					selected={selectedYear(market.seasonKey)}
+					onSelect={(y) => {
+						const k = seasonInYear(revYears, y, market.seasonKey);
+						if (k) onSeason?.(k);
+					}}
+					format={rs}
+					insight={seriesInsight(topRevenue, lineKeys, rs, 'top-earning crop')}
+					label="Revenue of the five top-earning crops by agricultural year"
+				/>
+				<p class="muted">Gross revenue per agricultural year at today's mandi prices and these yields. Complete years only.</p>
+			</section>
+		{/if}
+		{#if topValue.length}
+			<section>
+				<h3>Most value for water</h3>
+				<TLabValueTable rows={topValue} {span} />
+				<p class="muted">₹ of revenue per m³ of crop water need, all seasons{span ? ` from ${span}` : ''} added up.</p>
+			</section>
+		{/if}
+
+		{#if seasonColumns.columns.length}
+			<section>
+				<h3>Every season</h3>
+				<p class="muted">
+					Region revenue by crop if each season sold at today's mandi prices and these yields. K Kharif, R Rabi, S
+					Summer. Click a column to show that season on the map.
+				</p>
+				<TLabSeasonChart
+					columns={seasonColumns.columns}
+					selected={market.seasonKey}
+					onSelect={onSeason}
+					format={(v) => `₹${compactRupees(v)}`}
+					legend={seasonColumns.legend}
+					label="Revenue by season"
+				/>
+			</section>
+		{/if}
 
 		{#if cellId}
 			<section class="cell">
@@ -278,24 +335,6 @@
 				<p class="muted note">Not priced (no Agmarknet commodity mapped): {unmatched.map((c) => c.crop).join(', ')}.</p>
 			{/if}
 		</section>
-
-		{#if seasonColumns.columns.length}
-			<section>
-				<h3>Every season</h3>
-				<p class="muted">
-					Region revenue by crop if each season sold at today's mandi prices and these yields. K Kharif, R Rabi, S
-					Summer. Click a column to show that season on the map.
-				</p>
-				<TLabSeasonChart
-					columns={seasonColumns.columns}
-					selected={market.seasonKey}
-					onSelect={onSeason}
-					format={(v) => `₹${compactRupees(v)}`}
-					legend={seasonColumns.legend}
-					label="Revenue by season"
-				/>
-			</section>
-		{/if}
 
 		<section>
 			<h3>Sources</h3>

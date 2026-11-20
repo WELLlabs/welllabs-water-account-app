@@ -61,6 +61,8 @@ export interface WaterSeason {
 	plots: number;
 	m3: number;
 	peak: { calendarMonth: number; calendarYear: number; m3: number } | null;
+	/** Water need by crop (explorer regions; the Raichur snapshot has none) */
+	crops?: { crop: string; m3: number }[];
 }
 
 /** scripts/build_tlab_water.py output: water need only, `m3` per cell in `seasons` order */

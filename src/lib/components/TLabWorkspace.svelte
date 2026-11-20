@@ -1372,8 +1372,8 @@
 		<div class="tlab-group-label">Data layers <span class="tlab-group-hint">one at a time</span></div>
 
 		<TLabSection
-			title="Field landscape"
-			subtitle="Google Agricultural Understanding · selected cell"
+			title="Google ALU AMED"
+			subtitle="Google crop map and AMED crop calendar · selected cell"
 			swatch={LAYERS[0].color}
 			exclusive
 			on={showLandscape}
@@ -2599,7 +2599,7 @@
 			/>
 		{:else if showLandscape && water.status === 'done'}
 			<TLabMapHud
-				title="Field landscape"
+				title="Google ALU AMED"
 				years={water.years}
 				year={landscapeYear}
 				onYear={(y) => water.setYear(y)}
@@ -2722,6 +2722,7 @@
 					onRetry={() => boundary && market.retry(boundary)}
 					onOpenCell={revenueCellShown ? () => (revenuePanelHidden = false) : undefined}
 					seasonMix={gapi.allMix}
+					waterSeasons={water.seasons}
 					onSeason={(k) => water.setSeason(k)}
 				/>
 				{#snippet failed()}
@@ -3403,7 +3404,7 @@
 		max-width: 100%;
 	}
 
-	/* Every layer's insights panel is as wide as the Field landscape one */
+	/* Every layer's insights panel is as wide as the Google ALU AMED one */
 	@media (min-width: 769px) {
 		.tlab-panel-wrap > :global(aside) {
 			width: clamp(26rem, 36vw, 38rem);

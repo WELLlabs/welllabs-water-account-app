@@ -456,9 +456,10 @@ export function findBudgetRow(crop: string, budget: WaterBudgetRow[]): WaterBudg
 	const key = cropMatchKey(crop);
 	if (!key) return null;
 
+	// An exact name wins, so "Bajra (pearl millet)" gets its own row rather than the Millets one
 	return (
-		budget.find((row) => cropMatchKey(row.crop) === key) ??
 		budget.find((row) => normalizeCropName(row.crop) === normalizeCropName(crop)) ??
+		budget.find((row) => cropMatchKey(row.crop) === key) ??
 		null
 	);
 }

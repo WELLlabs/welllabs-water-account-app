@@ -4,6 +4,8 @@
 	import { fmtHa } from '$lib/tlabCrops.svelte';
 	import { gapiInsight, pinGapiLegend, type TLabGapi } from '$lib/tlabGapi.svelte';
 	import { seasonParts } from '$lib/tlabWater.svelte';
+	import TLabLineChart from './TLabLineChart.svelte';
+	import { completeYears, grownSeries, seasonInYear, selectedYear, seriesInsight } from '$lib/tlabSeries';
 	import TLabSeasonChart, { seasonSlot, sortSeasonColumns, type SeasonColumn } from './TLabSeasonChart.svelte';
 
 	interface Props {
@@ -69,6 +71,10 @@
 		})
 	);
 
+	const grownYears = $derived(completeYears(bars.map((b) => b.key)));
+	const grownKeys = $derived([...grownYears.keys()]);
+	const grown = $derived(grownSeries(gapi.allMix, grownYears));
+
 	function pct(part: number, whole: number): string {
 		if (whole <= 0 || part <= 0) return '0%';
 		return `${((part / whole) * 100).toFixed(1)}%`;
@@ -80,7 +86,7 @@
 		<div class="title">
 			<span class="sw" style:background="linear-gradient(135deg, #db2777, #2563eb, #7dd3fc)"></span>
 			<div>
-				<h2>Google ALU</h2>
+				<h2>Google ALU AMED</h2>
 				<p class="meta">
 					{regionName}{#if season}
 						· {season.season} {season.year}
@@ -187,6 +193,22 @@
 					]}
 					label="Farm area by season"
 				/>
+			</section>
+			<section>
+				<h3>Most grown crops</h3>
+				<TLabLineChart
+					keys={grownKeys}
+					series={grown}
+					selected={selectedYear(gapi.seasonKey)}
+					onSelect={(y) => {
+						const k = seasonInYear(grownYears, y, gapi.seasonKey);
+						if (k) onSeason(k);
+					}}
+					format={(v) => `${fmtHa(v)} ha`}
+					insight={seriesInsight(grown, grownKeys, (v) => `${fmtHa(v)} ha`, 'most grown crop')}
+					label="Gross cropped area of the five most grown crops by agricultural year"
+				/>
+				<p class="muted">Gross cropped area per agricultural year: Kharif, Rabi and Summer added up. Complete years only.</p>
 			</section>
 		{/if}
 
