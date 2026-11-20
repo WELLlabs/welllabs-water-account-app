@@ -9,6 +9,9 @@
 	import TLabCropPanel from '$lib/components/TLabCropPanel.svelte';
 	import TLabGapiPanel from '$lib/components/TLabGapiPanel.svelte';
 	import TLabWaterDistrictPanel from '$lib/components/TLabWaterDistrictPanel.svelte';
+	import TLabRevenuePanel from '$lib/components/TLabRevenuePanel.svelte';
+	import TLabRevenueCellPanel from '$lib/components/TLabRevenueCellPanel.svelte';
+	import { REVENUE_EMPTY, REVENUE_PALETTE, TLabMarket, compactRupees, formatRupees } from '$lib/tlabMarket.svelte';
 	import TLabCropStage from '$lib/components/TLabCropStage.svelte';
 	import { stageContext } from '$lib/tlabStage';
 	import TLabWaterControls, { type WaterCropSource } from '$lib/components/TLabWaterControls.svelte';
@@ -98,6 +101,7 @@
 
 	let openSec = $state({
 		water: true,
+		revenue: false,
 		landscape: false,
 		et: false,
 		etWapor: false,
@@ -212,11 +216,13 @@
 	};
 
 	const water = new TLabWater();
+	const market = new TLabMarket();
 	const npp = new TLabWaporLayer('npp', 'month');
 	const tbp = new TLabWaporLayer('tbp', 'year');
 	const gbwp = new TLabWaporLayer('gbwp', 'year');
 	onDestroy(() => {
 		water.destroy();
+		market.destroy();
 		etSeriesController?.abort();
 		waporSeriesController?.abort();
 		pcpSeriesController?.abort();
@@ -225,6 +231,7 @@
 		gbwp.abort();
 	});
 	let waterPanelHidden = $state(false);
+	let revenuePanelHidden = $state(false);
 	let waterCropSource = $state<WaterCropSource>('gapi');
 	onMount(() => {
 		if (!explorer) void water.load();
@@ -233,9 +240,10 @@
 	/** Data layers colour the whole district, so only one is shown at a time */
 	/** Flip to restore the NRSC Bhuvan ET sidebar layer (API still lives in api/hydro.py). */
 	const SHOW_NRSC_ET = false;
-	type DataLayer = 'water' | 'landscape' | 'et' | 'etWapor' | 'pcp' | 'npp' | 'tbp' | 'gbwp' | 'sm' | 'crops';
-	let dataLayer = $state<DataLayer | null>('water');
+	type DataLayer = 'water' | 'revenue' | 'landscape' | 'et' | 'etWapor' | 'pcp' | 'npp' | 'tbp' | 'gbwp' | 'sm' | 'crops';
+	let dataLayer = $state<DataLayer | null>('landscape');
 	const showWater = $derived(dataLayer === 'water');
+	const showRevenue = $derived(dataLayer === 'revenue');
 	const showLandscape = $derived(dataLayer === 'landscape');
 	const showEt = $derived(dataLayer === 'et');
 	const showEtWapor = $derived(dataLayer === 'etWapor');
@@ -251,10 +259,11 @@
 		dataLayer = on ? layer : dataLayer === layer ? null : dataLayer;
 		if (dataLayer !== 'landscape') selectedFeature = null;
 		if (!on) return;
-		for (const k of ['water', 'landscape', 'et', 'etWapor', 'pcp', 'npp', 'tbp', 'gbwp', 'sm', 'crops'] as const)
+		for (const k of ['water', 'revenue', 'landscape', 'et', 'etWapor', 'pcp', 'npp', 'tbp', 'gbwp', 'sm', 'crops'] as const)
 			openSec[k] = k === layer;
 		if ((hydroLayers as readonly string[]).includes(layer)) etPanelHidden = false;
 		if (layer === 'water') waterPanelHidden = false;
+		if (layer === 'revenue') revenuePanelHidden = false;
 		if (layer === 'sm') smPanelHidden = false;
 		if (layer === 'crops') cropPanelHidden = false;
 		if (layer === 'water' && water.status === 'error' && !explorer) void water.load();
@@ -264,7 +273,41 @@
 	const waterFromSurvey = $derived(showWater && waterCropSource === 'survey');
 	const waterFills = $derived(waterFromGapi && water.totals ? water.fills : null);
 	const waterCellShown = $derived(waterFromGapi && selectedCellId != null && water.cellId === selectedCellId);
-	const waterPlots = $derived(waterCellShown ? water.processed : null);
+	const revenueCellShown = $derived(showRevenue && selectedCellId != null && water.cellId === selectedCellId);
+	const revenuePlots = $derived(revenueCellShown && water.processed ? market.plotRevenue(water.plots) : null);
+	const revenuePlotColors = $derived(
+		revenuePlots ? market.plotColors(revenuePlots, water.viewMode, water.cropColors) : new Map<string, string>()
+	);
+	/** Map legend for the clicked cell's plots, following the panel's Crop level / Overall / Individual plots tab */
+	const revenueCellLegend = $derived.by(() => {
+		if (!revenuePlots) return null;
+		if (water.viewMode === 'plot') {
+			const b = market.plotBreaks(revenuePlots);
+			return { items: [], ramp: REVENUE_PALETTE, ticks: b.map((v) => compactRupees(v)), note: 'Plots by gross revenue, ₹. Grey: no priced crop.' };
+		}
+		if (water.viewMode === 'overall') {
+			return {
+				items: [
+					{ color: REVENUE_PALETTE[2], label: 'Plot with revenue', count: formatRupees(revenuePlots.reduce((s, p) => s + p.revenue, 0)) },
+					{ color: REVENUE_EMPTY, label: 'No priced crop', count: String(revenuePlots.filter((p) => !p.priced).length) }
+				],
+				ramp: [],
+				ticks: [],
+				note: 'Cell total across all plots.'
+			};
+		}
+		const byCrop = new Map<string, number>();
+		for (const p of revenuePlots) byCrop.set(p.crop, (byCrop.get(p.crop) ?? 0) + p.revenue);
+		return {
+			items: [...byCrop]
+				.sort((a, b) => b[1] - a[1])
+				.map(([crop, rs]) => ({ color: water.cropColors.get(crop) ?? REVENUE_EMPTY, label: crop, count: rs > 0 ? formatRupees(rs) : 'no price' })),
+			ramp: [],
+			ticks: [],
+			note: 'Plots by crop; click a crop or plot for its revenue.'
+		};
+	});
+	const waterPlots = $derived(waterCellShown || revenueCellShown ? water.processed : null);
 	const mapVisible = $derived.by(() => {
 		const out = { ...visible };
 		for (const l of LAYERS) out[l.type] = showLandscape && visible[l.type];
@@ -272,10 +315,11 @@
 	});
 	$effect(() => {
 		const id = selectedCellId;
-		if (!waterFromGapi || !id || !boundary || !water.cellIds.has(id)) return;
+		if (!(waterFromGapi || showRevenue) || !id || !boundary || !water.cellIds.has(id)) return;
 		untrack(() => {
 			if (water.cellId === id) return;
 			waterPanelHidden = false;
+			revenuePanelHidden = false;
 			void water.loadCell(id, boundary!);
 		});
 	});
@@ -290,6 +334,7 @@
 	function selectWaterPlot(id: string) {
 		selectedFeature = null;
 		waterPanelHidden = false;
+		revenuePanelHidden = false;
 		if (water.viewMode === 'group') {
 			const crop = water.plots.find((p) => p.id === id)?.crop ?? null;
 			water.selectedCrop = water.selectedCrop === crop ? null : crop;
@@ -654,9 +699,18 @@
 		gapi.seasonKey = water.seasonKey;
 	});
 	$effect(() => {
-		const on = showLandscape;
+		const on = showLandscape || showRevenue;
 		const b = boundary;
 		if (on && b && !explorer) untrack(() => void gapi.load(b));
+	});
+	// Market revenue: crop hectares for the selected season, priced once per boundary
+	$effect(() => {
+		market.seasonKey = water.seasonKey;
+		market.cells = water.seasonKey ? gapi.seasonCells(water.seasonKey) : new Map();
+	});
+	$effect(() => {
+		const b = boundary;
+		if (showRevenue && b) untrack(() => void market.load(b));
 	});
 	const cropFocus = $derived(crops.focus != null ? crops.groups[crops.focus] : null);
 	/** Season picker: years, then the seasons that year has */
@@ -790,7 +844,11 @@
 	);
 
 	const cellFills = $derived(
-		waterFromGapi
+		showRevenue
+			? market.status === 'done'
+				? market.fills
+				: null
+			: waterFromGapi
 			? waterFills
 			: showLandscape
 				? landscapeFills
@@ -799,7 +857,9 @@
 					: null
 	);
 	const cellTooltip = (id: string) =>
-		showCrops || waterFromSurvey ? crops.tooltip(id) : showLandscape ? landscapeTooltip(id) : waterTooltip(id);
+		showRevenue
+			? market.tooltip(id)
+			: showCrops || waterFromSurvey ? crops.tooltip(id) : showLandscape ? landscapeTooltip(id) : waterTooltip(id);
 	const smRaster = $derived(showSm ? soil.frame : null);
 	let etPanelHidden = $state(false);
 	const etCellValue = $derived(etMonth ? (etSeries?.find((p) => p.month === etMonth) ?? null) : null);
@@ -982,12 +1042,13 @@
 		untrack(() => {
 			clearCell();
 			gapi.reset();
+			market.reset();
 			water.applyRegion(null);
 			water.exportName = r ? regionSlug(r) : 'region';
+			market.exportName = water.exportName;
 			grid = r?.grid ?? null;
 			boundary = r?.boundary ?? null;
-			// Data straight onto the boundary, without grid outlines
-			showGrid = false;
+			showGrid = true;
 			if (r && cells.length) void applyRegionCells(cells);
 		});
 	});
@@ -1311,6 +1372,55 @@
 		<div class="tlab-group-label">Data layers <span class="tlab-group-hint">one at a time</span></div>
 
 		<TLabSection
+			title="Field landscape"
+			subtitle="Google Agricultural Understanding · selected cell"
+			swatch={LAYERS[0].color}
+			exclusive
+			on={showLandscape}
+			onToggle={(v) => setDataLayer('landscape', v)}
+			bind:open={openSec.landscape}
+		>
+			{#if !selectedCellId}
+				<p class="tlab-muted tlab-xs">Click a cell to load its farm plots, wells, ponds and trees with crop history.</p>
+			{/if}
+			<ul class="tlab-layers">
+				{#each LAYERS as layer}
+					{@const n = counts[layer.type] ?? 0}
+					<li>
+						<input
+							type="checkbox"
+							aria-label={`Show ${layer.label}`}
+							bind:checked={visible[layer.type]}
+						/>
+						<span class="tlab-swatch-lg" style:background={layer.color}></span>
+						<button
+							type="button"
+							class="tlab-layer-name"
+							disabled={!n || !showLandscape}
+							title={n ? `Zoom to ${layer.label.toLowerCase()}` : undefined}
+							onclick={() => mapRef?.zoomToType(layer.type)}
+						>
+							{layer.label}
+						</button>
+						<span class="tlab-count">{data ? n.toLocaleString('en-IN') : '–'}</span>
+					</li>
+				{/each}
+			</ul>
+			<p class="tlab-muted tlab-xs tlab-mt">
+				{#if gapi.status === 'loading' && gapi.total}
+					Loading Google ALU crops… {gapi.done.toLocaleString('en-IN')} of {gapi.total.toLocaleString('en-IN')} cells.
+				{:else if data}
+					Farm plots take Google's predicted crop. Grid colour is the largest Google ALU crop in the cell; stronger fill
+					where it covers more of the cell.
+				{:else}
+					Each cell takes the colour of its largest Google ALU crop. Stronger fill means that crop covers more of the
+					cell (~125 ha). Click a cell for farm plots, wells and ponds.
+				{/if}
+			</p>
+			{@render sources('landscape')}
+		</TLabSection>
+
+		<TLabSection
 			title="Water budget"
 			subtitle="Crop water need per grid cell · whole {explorer ? 'region' : 'district'}"
 			swatch="linear-gradient(135deg, {WATER_PALETTE[1]}, {WATER_PALETTE[4]})"
@@ -1382,53 +1492,38 @@
 		</TLabSection>
 
 		<TLabSection
-			title="Field landscape"
-			subtitle="Google Agricultural Understanding · selected cell"
-			swatch={LAYERS[0].color}
+			title="Market revenue"
+			subtitle="Crop area × yield × mandi price · per cell and plot"
+			swatch="linear-gradient(135deg, {REVENUE_PALETTE[1]}, {REVENUE_PALETTE[4]})"
 			exclusive
-			on={showLandscape}
-			onToggle={(v) => setDataLayer('landscape', v)}
-			bind:open={openSec.landscape}
+			on={showRevenue}
+			onToggle={(v) => setDataLayer('revenue', v)}
+			bind:open={openSec.revenue}
 		>
-			{#if !selectedCellId}
-				<p class="tlab-muted tlab-xs">Click a cell to load its farm plots, wells, ponds and trees with crop history.</p>
+			{#if explorer && gapi.status === 'idle'}
+				<p class="tlab-muted tlab-xs">No Google crop data came back for this region, so there is no revenue estimate.</p>
+			{:else if market.status === 'loading'}
+				<p class="tlab-muted tlab-xs">Fetching 30-day mandi prices from data.gov.in… this can take a minute.</p>
+			{:else if market.status === 'error'}
+				<p class="tlab-status tlab-error">
+					{market.error}
+					<button type="button" class="tlab-link" onclick={() => boundary && market.retry(boundary)}>Try again</button>
+				</p>
+			{:else if market.status === 'done'}
+				<p class="tlab-muted tlab-xs">
+					Google ALU crop hectares × DES district yield × median Agmarknet mandi price (last
+					{market.data?.windowDays} days). Gross revenue before costs. Click a cell for its plots.
+				</p>
+				<div class="tlab-water-exports tlab-mt">
+					<span class="tlab-xs tlab-muted">Export</span>
+					<button type="button" class="tlab-link" onclick={() => market.downloadCellsCsv()}>Cells CSV</button>
+				</div>
+			{:else}
+				<p class="tlab-muted tlab-xs">Turn this layer on to fetch mandi prices for the {explorer ? 'region' : 'district'}.</p>
 			{/if}
-			<ul class="tlab-layers">
-				{#each LAYERS as layer}
-					{@const n = counts[layer.type] ?? 0}
-					<li>
-						<input
-							type="checkbox"
-							aria-label={`Show ${layer.label}`}
-							bind:checked={visible[layer.type]}
-						/>
-						<span class="tlab-swatch-lg" style:background={layer.color}></span>
-						<button
-							type="button"
-							class="tlab-layer-name"
-							disabled={!n || !showLandscape}
-							title={n ? `Zoom to ${layer.label.toLowerCase()}` : undefined}
-							onclick={() => mapRef?.zoomToType(layer.type)}
-						>
-							{layer.label}
-						</button>
-						<span class="tlab-count">{data ? n.toLocaleString('en-IN') : '–'}</span>
-					</li>
-				{/each}
-			</ul>
-			<p class="tlab-muted tlab-xs tlab-mt">
-				{#if gapi.status === 'loading' && gapi.total}
-					Loading Google ALU crops… {gapi.done.toLocaleString('en-IN')} of {gapi.total.toLocaleString('en-IN')} cells.
-				{:else if data}
-					Farm plots take Google's predicted crop. Grid colour is the largest Google ALU crop in the cell; stronger fill
-					where it covers more of the cell.
-				{:else}
-					Each cell takes the colour of its largest Google ALU crop. Stronger fill means that crop covers more of the
-					cell (~125 ha). Click a cell for farm plots, wells and ponds.
-				{/if}
-			</p>
-			{@render sources('landscape')}
 		</TLabSection>
+
+
 
 		{#if SHOW_NRSC_ET}
 		<TLabSection
@@ -2426,7 +2521,7 @@
 			rasterOpacity={smOpacity}
 			{waterPlots}
 			focusCover={showLandscape}
-			waterPlotColors={water.plotColors}
+			waterPlotColors={showRevenue ? revenuePlotColors : water.plotColors}
 			waterSelectedPlot={waterPlots ? water.selectedPlot : null}
 			waterSelectedCrop={waterPlots && water.viewMode === 'group' ? water.selectedCrop : null}
 			onWaterPlotSelect={selectWaterPlot}
@@ -2466,7 +2561,27 @@
 				{/each}
 			</div>
 		{/if}
-		{#if showWater && water.status === 'done'}
+		{#if showRevenue && water.status === 'done'}
+			<TLabMapHud
+				title="Market revenue"
+				years={water.years}
+				year={landscapeYear}
+				onYear={(y) => water.setYear(y)}
+				seasons={landscapeSeasons}
+				seasonKey={water.seasonKey || null}
+				onSeason={(k) => water.setSeason(k)}
+				legendItems={revenueCellLegend?.items ?? []}
+				rampColors={revenueCellLegend ? revenueCellLegend.ramp : REVENUE_PALETTE}
+				rampTicks={revenueCellLegend ? revenueCellLegend.ticks : market.breaks.map((b) => compactRupees(b))}
+				legendNote={market.status === 'done'
+					? revenueCellLegend
+						? `${revenueCellLegend.note}${water.seasonKey ? ` · ${water.seasonKey}` : ''}`
+						: `₹ gross revenue per cell${water.seasonKey ? ` · ${water.seasonKey}` : ''}. Grey: no priced crop. Click a cell for its plots.`
+					: market.status === 'error'
+						? `Mandi prices unavailable: ${market.error}`
+						: 'Fetching mandi prices…'}
+			/>
+		{:else if showWater && water.status === 'done'}
 			<TLabWaterControls
 				{water}
 				source={waterCropSource}
@@ -2575,6 +2690,42 @@
 				</TLabGapiPanel>
 				{#snippet failed()}
 					<p class="tlab-status tlab-error">Could not show Google ALU district insights.</p>
+				{/snippet}
+			</svelte:boundary>
+		</div>
+	{:else if showRevenue && revenueCellShown && !revenuePanelHidden}
+		<div class="tlab-panel-wrap">
+			<svelte:boundary onerror={(e) => reportError(e instanceof Error ? (e.stack ?? e.message) : String(e))}>
+				<TLabRevenueCellPanel
+					{market}
+					{water}
+					cellToken={selectedToken}
+					onClose={() => (revenuePanelHidden = true)}
+					onZoomPlot={(id) => mapRef?.zoomToWaterPlot(id)}
+					onZoomCrop={(crop) => mapRef?.zoomToWaterCrop(crop)}
+				/>
+				{#snippet failed()}
+					<p class="tlab-status tlab-error">Could not show this cell's revenue.</p>
+				{/snippet}
+			</svelte:boundary>
+		</div>
+	{:else if showRevenue}
+		<div class="tlab-panel-wrap">
+			<svelte:boundary onerror={(e) => reportError(e instanceof Error ? (e.stack ?? e.message) : String(e))}>
+				<TLabRevenuePanel
+					{market}
+					{regionName}
+					cellId={selectedCellId}
+					cellToken={selectedCellId ? selectedToken : null}
+					plotsLoading={showRevenue && water.cellLoading}
+					plotsError={revenueCellShown ? water.cellError : null}
+					onRetry={() => boundary && market.retry(boundary)}
+					onOpenCell={revenueCellShown ? () => (revenuePanelHidden = false) : undefined}
+					seasonMix={gapi.allMix}
+					onSeason={(k) => water.setSeason(k)}
+				/>
+				{#snippet failed()}
+					<p class="tlab-status tlab-error">Could not show market revenue.</p>
 				{/snippet}
 			</svelte:boundary>
 		</div>
@@ -3250,6 +3401,13 @@
 
 	.tlab-panel-wrap > :global(aside) {
 		max-width: 100%;
+	}
+
+	/* Every layer's insights panel is as wide as the Field landscape one */
+	@media (min-width: 769px) {
+		.tlab-panel-wrap > :global(aside) {
+			width: clamp(26rem, 36vw, 38rem);
+		}
 	}
 
 	.tlab-map-failed {

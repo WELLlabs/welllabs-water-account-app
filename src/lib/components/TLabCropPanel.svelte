@@ -1,4 +1,5 @@
 <script lang="ts">
+	import TLabSeasonChart, { type SeasonColumn } from './TLabSeasonChart.svelte';
 	import { cropText, fmtHa, primaryKn, type CellRing, type CropArea, type TLabCrops } from '$lib/tlabCrops.svelte';
 
 	interface Props {
@@ -48,7 +49,6 @@
 			return { season: h.season, sum, parts, other };
 		})
 	);
-	const maxSum = $derived(Math.max(1, ...bars.map((b) => b.sum)));
 
 	const focusGroup = $derived(crops.focus != null ? crops.groups[crops.focus] : null);
 	const villages = $derived(!cellId && !plotId && focusGroup ? crops.topVillages(focusGroup.id) : []);
@@ -72,7 +72,47 @@
 		}
 		return [...years.values()].sort((a, b) => a.year - b.year);
 	});
-	const plotYearMax = $derived(Math.max(1, ...plotYearBars.map((b) => b.sum)));
+
+	const OTHER = '#cbd5e1';
+	const legend = $derived([
+		...keyGroups.map((g) => ({ color: g.color, label: cropText(g) })),
+		{ color: OTHER, label: 'Other' }
+	]);
+	const seasonShort = (kind: string) => kind.slice(0, 1).toUpperCase();
+
+	const seasonColumns = $derived<SeasonColumn[]>(
+		bars.map((b) => ({
+			key: b.season.key,
+			short: seasonShort(b.season.kind),
+			group: String(b.season.year),
+			total: b.sum,
+			segments: [...b.parts.map((p) => ({ color: p.g.color, value: p.ha })), { color: OTHER, value: Math.max(0, b.other) }],
+			title: `${b.season.label}: ${fmtHa(b.sum)} ha`
+		}))
+	);
+	const plotYearColumns = $derived<SeasonColumn[]>(
+		plotYearBars.map((b) => ({
+			key: String(b.year),
+			short: String(b.year),
+			total: b.sum,
+			segments: [...b.parts.map((p) => ({ color: p.g.color, value: p.ha })), { color: OTHER, value: Math.max(0, b.other) }],
+			title: `${b.year}: ${fmtHa(b.sum)} ha`
+		}))
+	);
+	const plotSeasonColumns = $derived<SeasonColumn[]>(
+		plotHistory.map((h) => {
+			const areas = h.info?.areas ?? [];
+			const sum = areas.reduce((x, a) => x + a.ha, 0);
+			return {
+				key: h.season.key,
+				short: seasonShort(h.season.kind),
+				group: String(h.season.year),
+				total: sum,
+				segments: areas.map((a) => ({ color: a.group.color, value: a.ha })),
+				title: `${h.season.label}: ${areas.length ? areas.map((a) => `${cropText(a.group)} ${a.ha.toFixed(2)} ha`).join(', ') : 'no record'}`
+			};
+		})
+	);
 
 	function toggleFocus(id: number) {
 		crops.focus = crops.focus === id ? null : id;
@@ -141,56 +181,30 @@
 		<section>
 			<h3>Trend over the years</h3>
 			<p class="muted">Surveyed crop area on this parcel (or its survey number). Click a year to show it on the map.</p>
-			<div class="hist">
-				{#each plotYearBars as b (b.year)}
-					<button
-						type="button"
-						class="hrow"
-						class:on={b.year === crops.season?.year}
-						onclick={() => {
-							const same = crops.seasons.find((s) => s.year === b.year && s.kind === crops.season?.kind);
-							crops.seasonKey = (same ?? crops.seasons.find((s) => s.year === b.year))?.key ?? crops.seasonKey;
-						}}
-						title="{b.year}: {fmtHa(b.sum)} ha"
-					>
-						<span class="hlabel">{b.year}</span>
-						<span class="hbar" style:width="{(b.sum / plotYearMax) * 100}%">
-							{#each b.parts as p (p.g.id)}
-								{#if p.ha > 0}<span style:flex-grow={p.ha} style:background={p.g.color}></span>{/if}
-							{/each}
-							{#if b.other > 0}<span style:flex-grow={b.other} style:background="#cbd5e1"></span>{/if}
-						</span>
-						<span class="hval">{fmtHa(b.sum)}</span>
-					</button>
-				{/each}
-			</div>
-			<div class="key">
-				{#each keyGroups as g (g.id)}<span><i style:background={g.color}></i>{cropText(g)}</span>{/each}
-				<span><i style:background="#cbd5e1"></i>Other</span>
-			</div>
+			<TLabSeasonChart
+				columns={plotYearColumns}
+				selected={crops.season ? String(crops.season.year) : null}
+				onSelect={(y) => {
+					const same = crops.seasons.find((x) => String(x.year) === y && x.kind === crops.season?.kind);
+					crops.seasonKey = (same ?? crops.seasons.find((x) => String(x.year) === y))?.key ?? crops.seasonKey;
+				}}
+				format={fmtHa}
+				unit="ha"
+				legend={legend}
+				label="Surveyed crop area by year"
+			/>
 		</section>
 
 		<section>
 			<h3>Every season</h3>
-			<div class="hist">
-				{#each plotHistory as h (h.season.key)}
-					<button
-						type="button"
-						class="hrow"
-						class:on={h.season.key === crops.seasonKey}
-						onclick={() => (crops.seasonKey = h.season.key)}
-						title="{h.season.label}: {h.info?.areas.length ? h.info.areas.map((a) => `${cropText(a.group)} ${a.ha.toFixed(2)} ha`).join(', ') : 'no record'}"
-					>
-						<span class="hlabel">{h.season.label}</span>
-						<span class="hbar" style:width="{Math.max(2, ((h.info?.areas.reduce((s, a) => s + a.ha, 0) ?? 0) / plotYearMax) * 100)}%">
-							{#each h.info?.areas ?? [] as a (a.group.name)}
-								<span style:flex-grow={a.ha} style:background={a.group.color}></span>
-							{/each}
-						</span>
-						<span class="hval">{h.info?.areas.length ? fmtHa(h.info.areas.reduce((s, a) => s + a.ha, 0)) : '—'}</span>
-					</button>
-				{/each}
-			</div>
+			<TLabSeasonChart
+				columns={plotSeasonColumns}
+				selected={crops.seasonKey}
+				onSelect={(k) => (crops.seasonKey = k)}
+				format={fmtHa}
+				unit="ha"
+				label="Surveyed crop area by season"
+			/>
 		</section>
 	{:else if !crops.season}
 		<section><p class="muted">No season selected.</p></section>
@@ -273,31 +287,16 @@
 
 		<section>
 			<h3>Every season</h3>
-			<p class="muted">Area by crop per season; click a bar to show that season on the map.</p>
-			<div class="hist">
-				{#each bars as b (b.season.key)}
-					<button
-						type="button"
-						class="hrow"
-						class:on={b.season.key === crops.seasonKey}
-						onclick={() => (crops.seasonKey = b.season.key)}
-						title="{b.season.label}: {fmtHa(b.sum)} ha"
-					>
-						<span class="hlabel">{b.season.label}</span>
-						<span class="hbar" style:width="{(b.sum / maxSum) * 100}%">
-							{#each b.parts as p (p.g.id)}
-								{#if p.ha > 0}<span style:flex-grow={p.ha} style:background={p.g.color}></span>{/if}
-							{/each}
-							{#if b.other > 0}<span style:flex-grow={b.other} style:background="#cbd5e1"></span>{/if}
-						</span>
-						<span class="hval">{fmtHa(b.sum)}</span>
-					</button>
-				{/each}
-			</div>
-			<div class="key">
-				{#each keyGroups as g (g.id)}<span><i style:background={g.color}></i>{cropText(g)}</span>{/each}
-				<span><i style:background="#cbd5e1"></i>Other</span>
-			</div>
+			<p class="muted">Area by crop per season, grouped by year. Click a column to show that season on the map.</p>
+			<TLabSeasonChart
+				columns={seasonColumns}
+				selected={crops.seasonKey}
+				onSelect={(k) => (crops.seasonKey = k)}
+				format={fmtHa}
+				unit="ha"
+				legend={legend}
+				label="Crop area by season"
+			/>
 		</section>
 
 		<section>
@@ -525,73 +524,6 @@
 		height: 0.45rem;
 		border-radius: 0.2rem;
 		min-width: 1px;
-	}
-
-	.hist {
-		display: flex;
-		flex-direction: column;
-		gap: 3px;
-	}
-
-	.hrow {
-		display: grid;
-		grid-template-columns: 5.6rem 1fr 3rem;
-		align-items: center;
-		gap: 0.4rem;
-		border: none;
-		background: none;
-		padding: 1px 0;
-		font: inherit;
-		color: inherit;
-		cursor: pointer;
-		text-align: left;
-	}
-
-	.hrow:hover .hlabel,
-	.hrow.on .hlabel {
-		font-weight: 700;
-	}
-
-	.hrow.on .hbar {
-		outline: 1.5px solid #e11d48;
-		outline-offset: 1px;
-	}
-
-	.hlabel {
-		font-size: 0.68rem;
-		white-space: nowrap;
-	}
-
-	.hbar {
-		display: flex;
-		height: 0.7rem;
-		min-width: 2px;
-		border-radius: 2px;
-		overflow: hidden;
-	}
-
-	.hval {
-		font-size: 0.66rem;
-		text-align: right;
-		color: #00296b99;
-		font-variant-numeric: tabular-nums;
-	}
-
-	.key {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.25rem 0.6rem;
-		margin-top: 0.6rem;
-		font-size: 0.65rem;
-		color: #00296bcc;
-	}
-
-	.key i {
-		display: inline-block;
-		width: 0.55rem;
-		height: 0.55rem;
-		margin-right: 0.25rem;
-		border-radius: 0.1rem;
 	}
 
 	@media (max-width: 768px) {

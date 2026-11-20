@@ -15,6 +15,7 @@ from fastapi.responses import Response
 
 from .agri import router as agri_router
 from .boundaries import router as boundaries_router
+from .market import router as market_router, start_collector
 from .gapi_crops import router as gapi_crops_router
 from .hydro import router as hydro_router
 from .layers import router as layers_router
@@ -37,6 +38,8 @@ app.add_middleware(
 
 app.include_router(agri_router)
 app.include_router(boundaries_router)
+app.include_router(market_router)
+app.add_event_handler("startup", start_collector)
 app.include_router(gapi_crops_router)
 app.include_router(hydro_router)
 app.include_router(raw_crops_router)

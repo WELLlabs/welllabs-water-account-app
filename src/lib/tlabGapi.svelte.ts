@@ -163,6 +163,16 @@ export class TLabGapi {
 		return this.byCell.get(id)?.get(this.seasonKey) ?? [];
 	}
 
+	/** Crop hectares per cell for one season (cells with no crop that season are left out) */
+	seasonCells(season: string): Map<string, GapiCropHa[]> {
+		const out = new Map<string, GapiCropHa[]>();
+		for (const [id, seasons] of this.byCell) {
+			const areas = seasons.get(season);
+			if (areas?.length) out.set(id, areas);
+		}
+		return out;
+	}
+
 	tooltip(id: string): string | null {
 		const areas = this.cell(id);
 		if (!areas.length || !this.seasonKey) return null;

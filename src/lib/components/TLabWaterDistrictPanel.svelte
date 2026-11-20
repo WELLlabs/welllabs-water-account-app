@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { fmt } from '$lib/components/cropcalc/format';
 	import { formatCalendarMonth } from '$lib/waterBudget';
+	import TLabSeasonChart, { seasonSlot, sortSeasonColumns, type SeasonColumn } from './TLabSeasonChart.svelte';
 	import { WATER_EMPTY, WATER_PALETTE, compactM3, seasonParts, type TLabWater } from '$lib/tlabWater.svelte';
 
 	interface Props {
@@ -40,7 +41,19 @@
 	});
 
 	const bars = $derived(water.seasons.filter((s) => s.m3 > 0 || s.plots > 0));
-	const maxSum = $derived(Math.max(1, ...bars.map((b) => b.m3)));
+	const columns = $derived<SeasonColumn[]>(
+		sortSeasonColumns(bars).map((b) => {
+			const slot = seasonSlot(b.key);
+			return {
+				key: b.key,
+				short: slot.short,
+				group: slot.group,
+				total: b.m3,
+				segments: [{ color: WATER_PALETTE[3], value: b.m3 }],
+				title: `${b.key}: ${fmt(b.m3)} m³ · ${fmt(b.plots)} plots`
+			};
+		})
+	);
 </script>
 
 <aside class="panel" aria-label="Water budget district insights">
@@ -119,24 +132,14 @@
 		{#if bars.length}
 			<section>
 				<h3>Every season</h3>
-				<p class="muted">District crop water need. Click a bar to show that season on the map.</p>
-				<div class="hist">
-					{#each bars as b (b.key)}
-						<button
-							type="button"
-							class="hrow"
-							class:on={b.key === water.seasonKey}
-							onclick={() => onSeason(b.key)}
-							title="{b.key}: {fmt(b.m3)} m³ · {fmt(b.plots)} plots"
-						>
-							<span class="hlabel">{b.key}</span>
-							<span class="hbar" style:width="{(b.m3 / maxSum) * 100}%">
-								<span style:flex-grow={Math.max(b.m3, 1)} style:background={WATER_PALETTE[3]}></span>
-							</span>
-							<span class="hval">{compactM3(b.m3)}</span>
-						</button>
-					{/each}
-				</div>
+				<p class="muted">District crop water need. K Kharif, R Rabi, S Summer. Click a column to show that season on the map.</p>
+				<TLabSeasonChart
+					{columns}
+					selected={water.seasonKey}
+					onSelect={onSeason}
+					format={compactM3}
+					label="Crop water need by season"
+				/>
 			</section>
 		{/if}
 
@@ -284,56 +287,6 @@
 		margin-left: auto;
 		font-variant-numeric: tabular-nums;
 		color: #00296b99;
-	}
-
-	.hist {
-		display: flex;
-		flex-direction: column;
-		gap: 3px;
-	}
-
-	.hrow {
-		display: grid;
-		grid-template-columns: 5.8rem 1fr 2.8rem;
-		align-items: center;
-		gap: 0.4rem;
-		border: none;
-		background: none;
-		padding: 1px 0;
-		font: inherit;
-		color: inherit;
-		cursor: pointer;
-		text-align: left;
-	}
-
-	.hrow:hover .hlabel,
-	.hrow.on .hlabel {
-		font-weight: 700;
-	}
-
-	.hrow.on .hbar {
-		outline: 1.5px solid #e11d48;
-		outline-offset: 1px;
-	}
-
-	.hlabel {
-		font-size: 0.68rem;
-		white-space: nowrap;
-	}
-
-	.hbar {
-		display: flex;
-		height: 0.7rem;
-		min-width: 2px;
-		border-radius: 2px;
-		overflow: hidden;
-	}
-
-	.hval {
-		font-size: 0.66rem;
-		text-align: right;
-		color: #00296b99;
-		font-variant-numeric: tabular-nums;
 	}
 
 	@media (max-width: 768px) {
