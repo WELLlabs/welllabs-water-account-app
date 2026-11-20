@@ -32,7 +32,7 @@
 		{
 			title: 'Farm Water Accounting',
 			description:
-				'The Farm Water Accounting App helps match water demand and supply in rural landscapes. Farmer collectives can map cropping patterns across a Water User Association to estimate demand, then balance it against supply available to assess equity. The toolset includes creating QField-ready survey forms, visualising collected data, planning crop water use, and balancing supply components in millimetres.',
+				'The Farm Water Accounting App helps match water demand and supply in rural landscapes. Farmer collectives can map cropping patterns across a Water User Association to estimate demand, then balance it against supply available to assess equity. The toolset includes creating QField-ready survey forms, visualising collected data, and planning crop water use.',
 			status: 'live' as const,
 			href: '/fwa'
 		},

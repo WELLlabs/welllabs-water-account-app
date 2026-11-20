@@ -3,7 +3,7 @@
 		<h1 class="mb-3 text-4xl font-semibold text-[#00296b]">Farm Water Accounting</h1>
 		<p class="mx-auto max-w-2xl text-lg text-slate-500">
 			Tools for farm water management: create QField-ready survey forms, visualize collected data,
-			plan crop water use, and balance supply components in millimetres.
+			and plan crop water use.
 		</p>
 	</header>
 
@@ -84,32 +84,6 @@
 			</p>
 			<span class="text-sm font-semibold text-amber-600 group-hover:text-amber-700"
 				>Open crop calculator →</span
-			>
-		</a>
-
-		<a
-			href="/fwa/supply"
-			class="group rounded-2xl border border-slate-200 bg-white p-8 shadow-sm transition-shadow hover:shadow-md"
-		>
-			<div
-				class="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-sky-100 text-sky-600 group-hover:bg-sky-600 group-hover:text-white"
-			>
-				<svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-					<path
-						stroke-linecap="round"
-						stroke-linejoin="round"
-						stroke-width="2"
-						d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z"
-					/>
-				</svg>
-			</div>
-			<h2 class="mb-2 text-xl font-semibold text-slate-900">Supply Calculator</h2>
-			<p class="mb-4 text-sm leading-relaxed text-slate-500">
-				Balance rainfall, canal water, groundwater, evapotranspiration, and soil moisture on a
-				stacked millimetre bar — adjust with sliders or by editing values directly.
-			</p>
-			<span class="text-sm font-semibold text-sky-600 group-hover:text-sky-700"
-				>Open supply calculator →</span
 			>
 		</a>
 

@@ -87,6 +87,10 @@ UPAG_CROPS: dict[str, tuple[str, float]] = {
     "Mustard": ("Rapeseed & Mustard", 10),
     "Wheat": ("Wheat", 10),
     "Soybeans": ("Soybean", 10),
+    "Tur": ("Tur", 10),
+    "Ragi": ("Ragi", 10),
+    "Sunflower": ("Sunflower", 10),
+    "Sesame": ("Sesamum", 10),
 }
 
 

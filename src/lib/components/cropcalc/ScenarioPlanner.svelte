@@ -7,6 +7,8 @@
 		parseWaterBudgetCsv,
 		type WaterBudgetRow
 	} from '$lib/waterBudget';
+	import PlannerIncome, { type IncomeCrop } from './PlannerIncome.svelte';
+	import { PlannerMarket, districtLabel } from '$lib/plannerMarket.svelte';
 
 	const CROP_COLORS = [
 		'#0ea5e9',
@@ -48,7 +50,10 @@
 		return `${y}-${m}-${day}`;
 	}
 
+	const market = new PlannerMarket();
+
 	onMount(async () => {
+		void market.init();
 		try {
 			const res = await fetch('/total_water_needed.csv');
 			if (!res.ok) throw new Error('Could not load total_water_needed.csv');
@@ -138,6 +143,19 @@
 	);
 
 	let irrigatedAllocations = $derived(allocations.filter((a) => getCrop(a.cropId).id !== 'fallow'));
+
+	let incomeCrops = $derived<IncomeCrop[]>(
+		irrigatedAllocations.map((a) => {
+			const crop = getCrop(a.cropId);
+			return {
+				id: crop.id,
+				name: crop.name,
+				color: crop.color,
+				acres: (totalAcreage * a.pct) / 100,
+				waterM3: cropSeasonalM3(a)
+			};
+		})
+	);
 
 	function addCrop(cropId: string) {
 		if (allocations.find((a) => a.cropId === cropId)) return;
@@ -268,6 +286,21 @@
 							bind:value={startDate}
 							class="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
 						/>
+					</div>
+
+					<div class="flex flex-col gap-1">
+						<label for="income-district" class="text-xs font-medium text-slate-500">District (prices &amp; yields)</label>
+						<input
+							id="income-district"
+							list="cropcalc-districts"
+							value={market.query}
+							oninput={(e) => market.setQuery(e.currentTarget.value)}
+							placeholder="Search a district…"
+							class="w-64 rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+						/>
+						<datalist id="cropcalc-districts">
+							{#each market.districts as d (d.id)}<option value={districtLabel(d)}></option>{/each}
+						</datalist>
 					</div>
 
 					<div class="flex flex-col gap-1">
@@ -567,6 +600,8 @@
 							{/if}
 						</div>
 
+						<PlannerIncome crops={incomeCrops} {market} />
+
 						{#if overallMonths.length > 0}
 							<div class="mt-4 overflow-hidden rounded-2xl border border-slate-200 bg-white">
 								<div class="border-b border-slate-100 px-5 py-3">
@@ -574,7 +609,7 @@
 										Month-wise Water Requirement (m³)
 									</h3>
 									<p class="mt-0.5 text-xs text-slate-400">
-										Month 1 starts at the sowing date ({startDate}). Values are cubic metres (m³).
+										Each crop month is 30 days from the sowing date ({startDate}), split across the calendar months it covers. Values are cubic metres (m³).
 									</p>
 								</div>
 

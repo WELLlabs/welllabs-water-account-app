@@ -32,7 +32,6 @@
 				{ href: '/fwa/create', label: 'Form Creator' },
 				{ href: '/fwa/visualize', label: 'Visualization' },
 				{ href: '/fwa/calculate', label: 'Crop Calc' },
-				{ href: '/fwa/supply', label: 'Supply' },
 				{ href: '/fwa/tlab', label: 'T-Lab' }
 			]
 		},

@@ -75,6 +75,12 @@ COMMODITIES: dict[str, list[str]] = {
     "Mustard": ["Mustard"],
     "Wheat": ["Wheat"],
     "Soybeans": ["Soyabean"],
+    # Crop water calculator crops that Google ALU does not map
+    # Agmarknet renamed these in 2026; the old names stop in May
+    "Tur": ["Red gram/Arhar/Tur(whole)", "Arhar(Tur/Red Gram)(Whole)"],
+    "Ragi": ["Ragi(Finger Millet)"],
+    "Sunflower": ["Sunflower/Sunflower Seed", "Sunflower"],
+    "Sesame": ["Sesamum(Sesame,Gingelly,Til)"],
 }
 
 # Agmarknet and DES spell some states differently from the district boundaries

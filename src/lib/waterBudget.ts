@@ -36,7 +36,7 @@ export const BUDGET_MONTHS: BudgetMonth[] = [
 
 export interface MonthlyWaterNeed {
 	month: BudgetMonth;
-	/** 1-based month index relative to sowing (month 1 = sowing month) */
+	/** 1-based calendar month counted from the sowing month (1 = the month sowing falls in) */
 	relativeMonth: number;
 	calendarMonth: number;
 	calendarYear: number;
@@ -470,48 +470,52 @@ export function inferSeasonFromSowingDate(sowingDate: Date): CropSeason {
 	return m >= 3 && m <= 8 ? 'Kharif' : 'Rabi';
 }
 
+/** Days in one crop month of the budget: month 1 is the 30 days from the sowing date, and so on. */
+export const CROP_MONTH_DAYS = 30;
+
+/**
+ * Spread each crop month's water over the calendar months its 30 days fall in. Sowing on 30 Nov
+ * puts almost all of crop month 1 in December, so a three-month crop runs into February.
+ */
 function buildMonthlyNeedsFromSowing(
 	monthM3PerAcre: Array<number | null>,
 	sowingDate: Date,
 	plotAcres: number
 ): MonthlyWaterNeed[] {
-	const monthlyNeeds: MonthlyWaterNeed[] = [];
-	let year = sowingDate.getFullYear();
-	let month = sowingDate.getMonth();
+	const y0 = sowingDate.getFullYear();
+	const m0 = sowingDate.getMonth();
+	const d0 = sowingDate.getDate();
+	// calendar offset from the sowing month → m³ per acre
+	const byOffset = new Map<number, number>();
 
 	for (let i = 0; i < monthM3PerAcre.length; i++) {
 		const m3PerAcre = monthM3PerAcre[i];
-		if (m3PerAcre === null) {
-			month += 1;
-			if (month > 11) {
-				month = 0;
-				year += 1;
-			}
-			continue;
-		}
-
-		const waterM3 = m3PerAcre * plotAcres;
-		const waterMmPerAcre = (m3PerAcre / ACRE_M2) * 1000;
-
-		monthlyNeeds.push({
-			month: BUDGET_MONTHS[month],
-			relativeMonth: i + 1,
-			calendarMonth: month,
-			calendarYear: year,
-			waterMmPerAcre,
-			waterMm: waterMmPerAcre * plotAcres,
-			waterM3PerAcre: m3PerAcre,
-			waterM3
-		});
-
-		month += 1;
-		if (month > 11) {
-			month = 0;
-			year += 1;
+		if (m3PerAcre === null || m3PerAcre === 0) continue;
+		const perDay = m3PerAcre / CROP_MONTH_DAYS;
+		for (let k = 0; k < CROP_MONTH_DAYS; k++) {
+			const day = new Date(y0, m0, d0 + i * CROP_MONTH_DAYS + k);
+			const offset = (day.getFullYear() - y0) * 12 + day.getMonth() - m0;
+			byOffset.set(offset, (byOffset.get(offset) ?? 0) + perDay);
 		}
 	}
 
-	return monthlyNeeds;
+	return [...byOffset.entries()]
+		.sort((a, b) => a[0] - b[0])
+		.map(([offset, m3PerAcre]) => {
+			const month = (m0 + offset) % 12;
+			const year = y0 + Math.floor((m0 + offset) / 12);
+			const waterMmPerAcre = (m3PerAcre / ACRE_M2) * 1000;
+			return {
+				month: BUDGET_MONTHS[month],
+				relativeMonth: offset + 1,
+				calendarMonth: month,
+				calendarYear: year,
+				waterMmPerAcre,
+				waterMm: waterMmPerAcre * plotAcres,
+				waterM3PerAcre: m3PerAcre,
+				waterM3: m3PerAcre * plotAcres
+			};
+		});
 }
 
 function sumVisibleWaterTotals(
